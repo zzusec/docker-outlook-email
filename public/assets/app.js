@@ -718,36 +718,27 @@ async function renderEmails(el, actions) {
   }
 }
 
-async function loadEmailList(accountId) {
-  if (!accountId) return;
-  state.selectedAccount = accountId;
-  state.selectedEmail = null;
-  const pane = document.getElementById('emailListPane');
-  pane.innerHTML = '<div class="loading"><div class="spinner"></div>加载邮件...</div>';
-  document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
+const EMAIL_PAGE_SIZE = 30;
 
+// Fetch one page of emails. Returns { items } or { error }.
+async function fetchEmailPage(accountId, skip) {
   const keyword = document.getElementById('emailSearch')?.value?.trim();
   const folder = document.getElementById('emailFolder')?.value || 'inbox';
-  let url = `/accounts/${accountId}/emails?top=30&folder=${encodeURIComponent(folder)}`;
+  let url = `/accounts/${accountId}/emails?top=${EMAIL_PAGE_SIZE}&skip=${skip}&folder=${encodeURIComponent(folder)}`;
   if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
 
   const res = await api(url);
   if (!res?.success || res.data?.error) {
-    pane.innerHTML = `<div class="empty-state" style="color:var(--danger)">${esc(res?.data?.error || res?.error?.message || '获取邮件失败')}</div>`;
-    return;
+    return { error: res?.data?.error || res?.error?.message || '获取邮件失败' };
   }
+  return { items: res.data?.items || [] };
+}
 
-  state.emailList = res.data?.items || [];
-  const countEl = document.getElementById('emailCount');
-  if (countEl) countEl.textContent = state.emailList.length + ' 封邮件';
-
-  if (state.emailList.length === 0) {
-    pane.innerHTML = '<div class="empty-state">该文件夹暂无邮件</div>';
-    return;
-  }
-
-  pane.innerHTML = state.emailList.map((e, i) => `
-    <div class="email-item ${e.isRead ? '' : 'unread'}" onclick="viewEmail(${i})" id="emailItem${i}">
+// Render email item rows; `startIndex` keeps onclick indices aligned with state.emailList
+function renderEmailItems(emails, startIndex) {
+  return emails.map((e, k) => {
+    const i = startIndex + k;
+    return `<div class="email-item ${e.isRead ? '' : 'unread'}" onclick="viewEmail(${i})" id="emailItem${i}">
       <div class="email-from">${esc(e.from?.name || e.from?.address || '未知')}</div>
       <div class="email-subject">${esc(e.subject)}</div>
       <div class="email-preview">${esc(e.bodyPreview)}</div>
@@ -757,8 +748,73 @@ async function loadEmailList(accountId) {
           ${e.hasAttachments ? '<span style="font-size:11px;color:var(--text-dim)">📎</span>' : ''}
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+}
+
+// "Load more" footer — shown only when the last page was full (likely more to fetch)
+function loadMoreFooterHtml() {
+  if (state.emailList.length === 0 || state.emailList.length % EMAIL_PAGE_SIZE !== 0) return '';
+  return `<div id="loadMoreWrap" style="padding:12px;text-align:center">
+    <button class="btn btn-sm" onclick="loadMoreEmails()">加载更多</button>
+  </div>`;
+}
+
+function updateEmailCount() {
+  const countEl = document.getElementById('emailCount');
+  if (countEl) countEl.textContent = '已加载 ' + state.emailList.length + ' 封';
+}
+
+async function loadEmailList(accountId) {
+  if (!accountId) return;
+  state.selectedAccount = accountId;
+  state.selectedEmail = null;
+  state.emailList = [];
+  const pane = document.getElementById('emailListPane');
+  pane.innerHTML = '<div class="loading"><div class="spinner"></div>加载邮件...</div>';
+  document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
+
+  const { items, error } = await fetchEmailPage(accountId, 0);
+  if (error) {
+    pane.innerHTML = `<div class="empty-state" style="color:var(--danger)">${esc(error)}</div>`;
+    return;
+  }
+
+  state.emailList = items;
+  updateEmailCount();
+
+  if (state.emailList.length === 0) {
+    pane.innerHTML = '<div class="empty-state">该文件夹暂无邮件</div>';
+    return;
+  }
+
+  pane.innerHTML = renderEmailItems(state.emailList, 0) + loadMoreFooterHtml();
+}
+
+// Append the next page without re-rendering existing rows (preserves scroll position)
+async function loadMoreEmails() {
+  const accountId = state.selectedAccount;
+  if (!accountId) return;
+  const wrap = document.getElementById('loadMoreWrap');
+  const btn = wrap?.querySelector('button');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中...'; }
+
+  const startIndex = state.emailList.length;
+  const { items, error } = await fetchEmailPage(accountId, startIndex);
+  if (error) {
+    toast(error, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+    return;
+  }
+  if (!items.length) { wrap?.remove(); return; }
+
+  state.emailList.push(...items);
+  if (wrap) wrap.insertAdjacentHTML('beforebegin', renderEmailItems(items, startIndex));
+  updateEmailCount();
+
+  // Drop the footer when the last page wasn't full (no further pages)
+  if (items.length < EMAIL_PAGE_SIZE) wrap?.remove();
+  else if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
 }
 
 function refreshEmails() {
