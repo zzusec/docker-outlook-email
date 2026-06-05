@@ -1,14 +1,21 @@
-# Outlook Email Manager
+# 📬 Outlook Email Manager
 
 <div align="center">
 
 **Lightweight Outlook email manager powered by Cloudflare Workers**
 
-100% Free · No Server Required · Global CDN · Dark/Light Theme
+🆓 100% Free · ☁️ No Server Required · 🌍 Global CDN · 🌗 Dark/Light Theme
+
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![Hono](https://img.shields.io/badge/Hono-4-E36002?logo=hono&logoColor=white)](https://hono.dev/)
+[![D1](https://img.shields.io/badge/D1-SQLite-003B57?logo=sqlite&logoColor=white)](https://developers.cloudflare.com/d1/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/roseforyou/cf-outlook-email/pulls)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/roseforyou/cf-outlook-email)
 
-[中文](./README.md) · [Deployment Guide](./docs/GUIDE.md)
+🌐 [中文](./README.md) · 📖 [Deployment Guide](./docs/GUIDE.md)
 
 </div>
 
@@ -16,17 +23,19 @@
 
 ![Preview](./docs/preview.png)
 
-## Features
+## ✨ Features
 
-- **One-Click OAuth** — Authorize Outlook accounts via browser popup, no manual token copying
-- **Auto Token Refresh** — Automatically saves new refresh tokens on each use, preventing expiry
-- **Batch Operations** — Import/export/delete/move accounts in bulk with group & status filters
-- **Email Reading** — Read inbox via Microsoft Graph API with search and HTML rendering
-- **Temp Email** — GPTMail API integration for disposable email addresses
-- **Theme Switching** — Dark / Light / Auto with glassmorphism UI
-- **Completely Free** — Runs on Cloudflare's free tier, no credit card needed
+- 🔐 **One-Click OAuth** — Authorize Outlook accounts via browser popup, no manual token copying
+- 🔄 **Auto Token Refresh** — Automatically saves new refresh tokens on each use, preventing expiry
+- 📦 **Batch Operations** — Import/export/delete/move accounts in bulk with group & status filters
+- 📨 **Email Reading** — Read inbox via Microsoft Graph API with search and HTML rendering
+- 🪄 **Temp Email** — GPTMail API integration for disposable email addresses
+- 🎨 **Polished Themes** — Dark / Light / Auto with glassmorphism, circle-swoop transition & ambient breathing glow
+- 🆓 **Completely Free** — Runs on Cloudflare's free tier, no credit card needed
 
-## Quick Deploy
+## 🚀 Quick Deploy
+
+> 💡 See the [Deployment Guide](./docs/GUIDE.md) for full steps.
 
 ```bash
 # 1. Clone & install
@@ -51,44 +60,44 @@ pnpm exec wrangler d1 migrations apply outlook-email-db --remote
 pnpm exec wrangler deploy
 ```
 
-Visit the output URL and login with your password.
+Visit the output URL and login with your password. 🎉
 
-## Adding Accounts
+## 📮 Adding Accounts
 
 Login → **Add Account** → **One-Click Auth** → Microsoft login popup → Authorize → Credentials auto-filled → Save.
 
 Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format: `email----password----client_id----refresh_token`).
 
-## Tech Stack
+## 🧱 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Runtime | Cloudflare Workers (TypeScript) |
-| Router | Hono |
-| Database | Cloudflare D1 (SQLite) |
-| Frontend | Vanilla HTML/CSS/JS |
-| Email | Microsoft Graph API |
-| Deploy | Wrangler |
+| ⚙️ Runtime | Cloudflare Workers (TypeScript) |
+| 🧭 Router | Hono |
+| 🗄️ Database | Cloudflare D1 (SQLite) |
+| 🎨 Frontend | Vanilla HTML/CSS/JS |
+| 📧 Email | Microsoft Graph API |
+| 🚀 Deploy | Wrangler |
 
-## Free Tier Limits
+## 💰 Free Tier Limits
 
 | Resource | Free Quota | Sufficient? |
 |----------|-----------|:-----------:|
-| Worker Requests | 100K/day | ✅ |
-| CPU Time | 10ms/req | ✅ |
-| Subrequests | 50/req | ✅ (single account per request) |
-| D1 Storage | 5 GB | ✅ |
+| ⚡ Worker Requests | 100K/day | ✅ |
+| ⏱️ CPU Time | 10ms/req | ✅ |
+| 🌐 Subrequests | 50/req | ✅ (single account per request) |
+| 💾 D1 Storage | 5 GB | ✅ |
 
-## Disclaimer
+## ⚠️ Disclaimer
 
 This project is intended for personal use to manage your own email accounts. Ensure you have legal authorization for all accounts you manage. The default Client ID is Mozilla Thunderbird's public ID for quick setup only — registering your own Azure app is recommended for production use. The author assumes no liability for any misuse.
 
-## Credits
+## 🙏 Credits
 
 This project is a rewrite of [xiaozhi349/outlookEmail](https://github.com/xiaozhi349/outlookEmail), originally built with Python Flask + SQLite. It has been migrated to Cloudflare Workers + D1 with a completely new frontend and backend. Thanks to the original author.
 
-## License
+## 📜 License
 
-[GPL-3.0](./LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
 
-Free to use, modify, and distribute.
+Licensed under **GPL-3.0**. Free to use, modify, and distribute — but any distributed derivative must also be open-sourced under GPL-3.0 with full source code.
