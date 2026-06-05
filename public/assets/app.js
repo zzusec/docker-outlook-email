@@ -688,6 +688,11 @@ async function renderEmails(el, actions) {
           <option value="">-- 选择账号 --</option>
           ${activeAccounts.map(a => `<option value="${a.id}">${esc(a.email)}</option>`).join('')}
         </select>
+        <select class="form-select" style="width:auto;min-width:100px" id="emailFolder" onchange="onFolderChange()">
+          <option value="inbox">收件箱</option>
+          <option value="junkemail">垃圾箱</option>
+          <option value="deleteditems">已删除</option>
+        </select>
         <button class="btn btn-sm" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
         <span style="flex:1"></span>
@@ -722,7 +727,8 @@ async function loadEmailList(accountId) {
   document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
 
   const keyword = document.getElementById('emailSearch')?.value?.trim();
-  let url = `/accounts/${accountId}/emails?top=30`;
+  const folder = document.getElementById('emailFolder')?.value || 'inbox';
+  let url = `/accounts/${accountId}/emails?top=30&folder=${encodeURIComponent(folder)}`;
   if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
 
   const res = await api(url);
@@ -736,7 +742,7 @@ async function loadEmailList(accountId) {
   if (countEl) countEl.textContent = state.emailList.length + ' 封邮件';
 
   if (state.emailList.length === 0) {
-    pane.innerHTML = '<div class="empty-state">收件箱为空</div>';
+    pane.innerHTML = '<div class="empty-state">该文件夹暂无邮件</div>';
     return;
   }
 
@@ -756,6 +762,11 @@ async function loadEmailList(accountId) {
 }
 
 function refreshEmails() {
+  if (state.selectedAccount) loadEmailList(state.selectedAccount);
+}
+
+// Switch mail folder (inbox / junkemail / deleteditems)
+function onFolderChange() {
   if (state.selectedAccount) loadEmailList(state.selectedAccount);
 }
 
