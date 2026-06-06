@@ -139,6 +139,10 @@ tools/                   辅助脚本
 
 本项目基于 [xiaozhi349/outlookEmail](https://github.com/xiaozhi349/outlookEmail) 改造而来。原项目为 Python Flask + SQLite 实现，本项目将其迁移至 Cloudflare Workers + D1，并重写了前后端代码。感谢原作者的工作。
 
+## 友情链接
+
+[LINUX DO](https://linux.do/) —— 新的理想型社区，技术爱好者的聚集地。
+
 ## 📜 许可证
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
