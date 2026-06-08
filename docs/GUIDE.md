@@ -364,13 +364,45 @@ Client ID 只有 IMAP 权限。编辑账号 → "重新授权"切换到 Thunderb
 
 个人 Outlook 账号需要先加入 [M365 开发者计划](https://developer.microsoft.com/en-us/microsoft-365/dev-program)（免费）。
 
+### 本地正常，部署后接口 500（登录就报 500）
+
+**最常见的部署问题。** 登录接口第一步就要读数据库，生产环境少配东西就会抛异常变成 500。
+按概率排查这三项：
+
+1. **远程数据库没迁移**（最常见，本地迁移不算数）：
+   ```bash
+   pnpm exec wrangler d1 migrations apply outlook-email-db --remote
+   ```
+   远程库没有 `settings` / `accounts` 表 → 登录查表直接报错 → 500。
+2. **密钥没设**（生产必须单独设，本地的 `.dev.vars` 不会带上去）：
+   ```bash
+   pnpm exec wrangler secret put ADMIN_PASSWORD
+   pnpm exec wrangler secret put COOKIE_SECRET
+   ```
+   缺 `COOKIE_SECRET` 会在签发登录 Cookie 时抛异常 → 500。
+3. **`wrangler.toml` 里 `database_id` 填错或仍是占位符** `REPLACE_WITH_YOUR_DATABASE_ID`
+   → D1 绑定无效 → 查询报错 → 500。
+
+> 以上命令都作用于**线上**资源，本地无需启动 `pnpm run dev`。设完直接访问线上 URL 重新登录即可（secret 改动下次请求即生效，无需重新部署）。
+
+### 想看线上接口的真实报错
+
+```bash
+pnpm exec wrangler tail   # 保持开着，再点一次出错的操作，终端会打印异常
+```
+
+> ⚠️ 国内网络下 `wrangler tail` 常报 `connect ETIMEDOUT ...:443`——tail 会话已创建，但拉取
+> 日志流的长连接连不通（被墙）。两个办法：① 挂代理 `HTTPS_PROXY=http://127.0.0.1:端口 pnpm exec wrangler tail`；
+> ② **改用网页版**：Cloudflare 控制台 → Workers & Pages → 你的 worker → **Logs** → **Begin log stream**，
+> 浏览器直连，国内基本能用。
+
 ### 登录后跳回登录页
 
 确认 `COOKIE_SECRET` 已配置，浏览器允许 Cookie。
 
-### wrangler 命令不存在
+### wrangler 命令不存在 / `npx: command not found`
 
-不需要全局安装，用 `pnpm exec wrangler` 即可。
+不需要全局安装，也不用 `npx`，本项目用 pnpm，统一用 `pnpm exec wrangler ...` 即可。
 
 ---
 
