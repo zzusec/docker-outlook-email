@@ -1238,7 +1238,7 @@ function showModal(title, bodyHtml, onConfirm) {
     </div>
   `;
   document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  // Intentionally NOT closing on backdrop click — only × or 取消 close the modal
 
   const confirmBtn = document.getElementById('modalConfirmBtn');
   confirmBtn.addEventListener('click', async () => {
