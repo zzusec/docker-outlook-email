@@ -181,6 +181,15 @@ export async function deleteEmail(
     });
     if (res.status === 204 || res.ok) return { ok: true };
     if (res.status === 404) return { ok: false, error: { code: 'NOT_FOUND', message: '邮件不存在' } };
+    if (res.status === 403) {
+      return {
+        ok: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: '无删除权限：该账号是只读授权。请在「编辑账号 → 重新授权」重新授权以获取读写权限',
+        },
+      };
+    }
     return { ok: false, error: { code: 'GRAPH_ERROR', message: `删除失败: ${res.status}` } };
   } catch (e) {
     return {

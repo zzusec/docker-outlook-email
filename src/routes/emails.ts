@@ -134,10 +134,12 @@ emails.post('/batch-delete', async (c) => {
   const deleted = results.filter((r) => r.ok).length;
   const failed = targets.length - deleted;
   const skipped = ids.length - targets.length;
+  const forbidden = results.some((r) => r.error?.code === 'FORBIDDEN');
 
   let msg = `已删除 ${deleted} 封`;
   if (failed) msg += `，失败 ${failed} 封`;
   if (skipped) msg += `，超出单次上限未处理 ${skipped} 封（请分批）`;
+  if (forbidden) msg += '。该账号为只读授权，请「编辑账号 → 重新授权」获取读写权限';
   return ok({ deleted, failed, skipped }, msg);
 });
 
