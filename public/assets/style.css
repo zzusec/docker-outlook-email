@@ -154,7 +154,8 @@ button { cursor: pointer; font-family: inherit; }
 .app.sidebar-collapsed .nav-item { justify-content: center; padding: 11px 0; }
 .app.sidebar-collapsed .nav-item.active::before { display: none; }
 .app.sidebar-collapsed .sidebar-footer { padding: 12px; text-align: center; }
-.app.sidebar-collapsed .logout-btn { justify-content: center; }
+.app.sidebar-collapsed .logout-btn,
+.app.sidebar-collapsed .repo-link { justify-content: center; }
 .app.sidebar-collapsed .main { margin-left: 64px; }
 .sidebar, .main { transition: all var(--transition-slow); }
 .sidebar-logo {
@@ -211,6 +212,14 @@ button { cursor: pointer; font-family: inherit; }
   transition: color var(--transition);
 }
 .logout-btn:hover { color: var(--danger); }
+.repo-link {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-dim); font-size: 13px;
+  padding: 8px 0; margin-bottom: 4px;
+  transition: color var(--transition);
+}
+.repo-link:hover { color: var(--primary-light); }
+.repo-link svg { flex-shrink: 0; }
 
 /* Main */
 .main { flex: 1; margin-left: var(--sidebar-w); }
