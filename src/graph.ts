@@ -63,6 +63,21 @@ export async function fetchEmails(
 ): Promise<{ items?: GraphMailMessage[]; error?: GraphError }> {
   const { folder = 'inbox', top = 20, skip = 0, keyword } = options;
 
+  // Aggregated view: merge inbox + junk, sorted by date desc. Single page (skip ignored)
+  // to keep merged ordering correct; 2 subrequests stay within the free-tier budget.
+  if (folder === 'all') {
+    const [inbox, junk] = await Promise.all([
+      fetchEmails(accessToken, { folder: 'inbox', top, skip: 0, keyword }),
+      fetchEmails(accessToken, { folder: 'junkemail', top, skip: 0, keyword }),
+    ]);
+    // If both fail, surface the error; otherwise show whatever succeeded
+    if (inbox.error && junk.error) return { error: inbox.error };
+    const merged = [...(inbox.items ?? []), ...(junk.items ?? [])]
+      .sort((a, b) => (b.receivedDateTime ?? '').localeCompare(a.receivedDateTime ?? ''))
+      .slice(0, top);
+    return { items: merged };
+  }
+
   let url = `${GRAPH_BASE}/me/mailFolders/${folder}/messages`;
   const params = new URLSearchParams({
     $top: String(top),

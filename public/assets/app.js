@@ -76,6 +76,7 @@ let state = {
   emailList: [],
   selectedEmail: null,
   pendingEmailAccount: null,
+  pendingAccountStatus: null,
 };
 
 // ========== API Helpers ==========
@@ -178,14 +179,14 @@ async function renderDashboard(el) {
   const errorCount = state.accounts.filter(a => a.status === 'error').length;
   const disabledCount = state.accounts.filter(a => a.status === 'disabled').length;
   const stats = [
-    { label: '邮箱账号', value: state.accounts.length, color: 'var(--primary)', bg: 'var(--primary-bg)', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' },
-    { label: '分组数量', value: state.groups.length, color: 'var(--primary-light)', bg: 'rgba(129,140,248,0.1)', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>' },
-    { label: '活跃', value: activeCount, color: 'var(--success)', bg: 'var(--success-bg)', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' },
-    { label: '异常', value: errorCount, color: 'var(--danger)', bg: 'var(--danger-bg)', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' },
+    { label: '邮箱账号', value: state.accounts.length, color: 'var(--primary)', bg: 'var(--primary-bg)', go: "navigate('accounts')", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' },
+    { label: '分组数量', value: state.groups.length, color: 'var(--primary-light)', bg: 'rgba(129,140,248,0.1)', go: "navigate('groups')", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>' },
+    { label: '活跃', value: activeCount, color: 'var(--success)', bg: 'var(--success-bg)', go: "goToAccounts('active')", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' },
+    { label: '异常', value: errorCount, color: 'var(--danger)', bg: 'var(--danger-bg)', go: "goToAccounts('error')", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' },
   ];
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px;">
-      ${stats.map(s => `<div class="card" style="display:flex;align-items:center;gap:16px;padding:20px 22px">
+      ${stats.map(s => `<div class="card" style="display:flex;align-items:center;gap:16px;padding:20px 22px;cursor:pointer" onclick="${s.go}" title="点击进入">
         <div style="width:44px;height:44px;border-radius:12px;background:${s.bg};display:flex;align-items:center;justify-content:center;color:${s.color};flex-shrink:0">${s.icon}</div>
         <div><div style="font-size:28px;font-weight:700;color:${s.color};line-height:1.1">${s.value}</div><div style="color:var(--text-dim);font-size:12.5px;margin-top:2px">${s.label}</div></div>
       </div>`).join('')}
@@ -199,6 +200,12 @@ async function renderDashboard(el) {
       <button class="btn btn-primary" onclick="navigate('accounts')">前往添加</button>
     </div>` : ''}
   `;
+}
+
+// Jump to accounts page, optionally pre-filtering by status (from dashboard cards)
+function goToAccounts(status) {
+  state.pendingAccountStatus = status || '';
+  navigate('accounts');
 }
 
 // ========== Groups ==========
@@ -315,6 +322,13 @@ async function renderAccounts(el, actions) {
     </tr></thead>
     <tbody id="accountsBody">${renderAccountRows(state.accounts)}</tbody>
   </table></div>`;
+
+  // Apply a status filter requested from the dashboard cards (活跃 / 异常)
+  if (state.pendingAccountStatus) {
+    const sel = document.getElementById('accountStatusFilter');
+    if (sel) { sel.value = state.pendingAccountStatus; filterAccountsByStatus(state.pendingAccountStatus); }
+    state.pendingAccountStatus = null;
+  }
 }
 
 var selectedAccountIds = new Set();
@@ -754,7 +768,9 @@ async function renderEmails(el, actions) {
           <option value="inbox">收件箱</option>
           <option value="junkemail">垃圾箱</option>
           <option value="deleteditems">已删除</option>
+          <option value="all">全部（收件箱+垃圾箱）</option>
         </select>
+        <button class="btn btn-sm" onclick="copySelectedEmail(this)" title="复制当前邮箱地址">复制邮箱</button>
         <button class="btn btn-sm" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
         <span style="flex:1"></span>
@@ -814,12 +830,22 @@ function renderEmailItems(emails, startIndex) {
   }).join('');
 }
 
-// "Load more" footer — shown only when the last page was full (likely more to fetch)
+// "Load more" footer — shown only when the last page was full (likely more to fetch).
+// Disabled for the aggregated "all" view, which returns a single merged page.
 function loadMoreFooterHtml() {
+  const folder = document.getElementById('emailFolder')?.value || 'inbox';
+  if (folder === 'all') return '';
   if (state.emailList.length === 0 || state.emailList.length % EMAIL_PAGE_SIZE !== 0) return '';
   return `<div id="loadMoreWrap" style="padding:12px;text-align:center">
     <button class="btn btn-sm" onclick="loadMoreEmails()">加载更多</button>
   </div>`;
+}
+
+// Copy the currently selected account's email address
+function copySelectedEmail(btn) {
+  const acc = state.accounts.find(a => String(a.id) === String(state.selectedAccount));
+  if (!acc) { toast('请先选择邮箱账号', 'error'); return; }
+  copyText(acc.email, btn);
 }
 
 function updateEmailCount() {
