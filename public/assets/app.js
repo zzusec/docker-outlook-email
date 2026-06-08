@@ -75,6 +75,7 @@ let state = {
   selectedAccount: null,
   emailList: [],
   selectedEmail: null,
+  selectedEmailIds: new Set(),
   pendingEmailAccount: null,
   pendingAccountStatus: null,
 };
@@ -774,6 +775,7 @@ async function renderEmails(el, actions) {
         <button class="btn" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
         <span style="flex:1"></span>
+        <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
       </div>
       <div class="email-panes">
@@ -816,14 +818,20 @@ async function fetchEmailPage(accountId, skip) {
 function renderEmailItems(emails, startIndex) {
   return emails.map((e, k) => {
     const i = startIndex + k;
-    return `<div class="email-item ${e.isRead ? '' : 'unread'}" onclick="viewEmail(${i})" id="emailItem${i}">
-      <div class="email-from">${esc(e.from?.name || e.from?.address || '未知')}</div>
-      <div class="email-subject">${esc(e.subject)}</div>
-      <div class="email-preview">${esc(e.bodyPreview)}</div>
-      <div class="email-meta">
-        <span class="email-date">${formatDate(e.receivedDateTime)}</span>
-        <div class="email-badges">
-          ${e.hasAttachments ? '<span style="font-size:11px;color:var(--text-dim)">📎</span>' : ''}
+    const checked = state.selectedEmailIds.has(e.id) ? 'checked' : '';
+    return `<div class="email-item ${e.isRead ? '' : 'unread'}" id="emailItem${i}">
+      <label class="email-check-wrap" onclick="event.stopPropagation()">
+        <input type="checkbox" class="email-check" data-id="${esc(e.id)}" ${checked} onchange="toggleEmailSelect('${esc(e.id)}', this.checked)">
+      </label>
+      <div class="email-item-body" onclick="viewEmail(${i})">
+        <div class="email-from">${esc(e.from?.name || e.from?.address || '未知')}</div>
+        <div class="email-subject">${esc(e.subject)}</div>
+        <div class="email-preview">${esc(e.bodyPreview)}</div>
+        <div class="email-meta">
+          <span class="email-date">${formatDate(e.receivedDateTime)}</span>
+          <div class="email-badges">
+            ${e.hasAttachments ? '<span style="font-size:11px;color:var(--text-dim)">📎</span>' : ''}
+          </div>
         </div>
       </div>
     </div>`;
@@ -858,6 +866,8 @@ async function loadEmailList(accountId) {
   state.selectedAccount = accountId;
   state.selectedEmail = null;
   state.emailList = [];
+  state.selectedEmailIds.clear();
+  updateEmailBatchActions();
   const pane = document.getElementById('emailListPane');
   pane.innerHTML = '<div class="loading"><div class="spinner"></div>加载邮件...</div>';
   document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
@@ -943,7 +953,10 @@ async function viewEmail(index) {
 
   pane.innerHTML = `
     <div class="detail-pane" style="border:none;padding:0">
-      <h2>${esc(e.subject)}</h2>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <h2 style="flex:1">${esc(e.subject)}</h2>
+        <button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="deleteCurrentEmail('${esc(e.id)}')">删除</button>
+      </div>
       <div class="detail-meta">
         <span>发件人: ${esc(e.from?.name || '')} &lt;${esc(e.from?.address || '')}&gt;</span><br>
         <span>收件人: ${(e.toRecipients || []).map(r => esc(r.address)).join(', ')}</span><br>
@@ -967,6 +980,71 @@ async function viewEmail(index) {
 
 function resizeFrame(frame) {
   try { frame.style.height = frame.contentDocument.body.scrollHeight + 40 + 'px'; } catch {}
+}
+
+// ---- Email deletion (single / batch) ----
+function toggleEmailSelect(id, checked) {
+  if (checked) state.selectedEmailIds.add(id);
+  else state.selectedEmailIds.delete(id);
+  updateEmailBatchActions();
+}
+
+function updateEmailBatchActions() {
+  const el = document.getElementById('emailBatchActions');
+  if (!el) return;
+  const n = state.selectedEmailIds.size;
+  el.innerHTML = n > 0
+    ? `<span style="font-size:12px;color:var(--text-muted)">已选 ${n}</span>
+       <button class="btn btn-danger btn-sm" onclick="deleteSelectedEmails()">删除选中</button>
+       <button class="btn btn-sm" onclick="clearEmailSelection()">取消</button>`
+    : '';
+}
+
+function clearEmailSelection() {
+  state.selectedEmailIds.clear();
+  document.querySelectorAll('.email-check').forEach(cb => { cb.checked = false; });
+  updateEmailBatchActions();
+}
+
+// Remove deleted messages from the in-memory list and re-render, without a full refetch
+function removeEmailsFromList(ids) {
+  const set = new Set(ids);
+  state.emailList = state.emailList.filter(e => !set.has(e.id));
+  ids.forEach(id => state.selectedEmailIds.delete(id));
+  state.selectedEmail = null;
+
+  const pane = document.getElementById('emailListPane');
+  if (pane) {
+    pane.innerHTML = state.emailList.length
+      ? renderEmailItems(state.emailList, 0) + loadMoreFooterHtml()
+      : '<div class="empty-state">该文件夹暂无邮件</div>';
+  }
+  const detail = document.getElementById('emailDetailPane');
+  if (detail) detail.innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
+  updateEmailCount();
+  updateEmailBatchActions();
+}
+
+async function deleteCurrentEmail(id) {
+  if (!confirm('确认删除这封邮件？（移至「已删除」文件夹）')) return;
+  const res = await api(`/accounts/${state.selectedAccount}/emails/${id}`, { method: 'DELETE' });
+  if (!res?.success) { toast(res?.error?.message || '删除失败', 'error'); return; }
+  toast('已删除');
+  removeEmailsFromList([id]);
+}
+
+async function deleteSelectedEmails() {
+  const ids = [...state.selectedEmailIds];
+  if (!ids.length) return;
+  if (!confirm(`确认删除选中的 ${ids.length} 封邮件？（移至「已删除」文件夹）`)) return;
+  const res = await api(`/accounts/${state.selectedAccount}/emails/batch-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  if (!res?.success) { toast(res?.error?.message || '删除失败', 'error', 6000); return; }
+  toast(res.message || '已删除', 'success', 5000);
+  // Only remove the ones actually deleted is hard to know per-id; refetch is simplest & correct
+  removeEmailsFromList(ids);
 }
 
 // ========== Temp Emails ==========

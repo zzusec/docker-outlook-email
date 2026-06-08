@@ -426,9 +426,12 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ===== Email Items ===== */
 .email-item {
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 14px 18px; border-bottom: 1px solid var(--border);
-  cursor: pointer; transition: all var(--transition);
+  transition: all var(--transition);
 }
+.email-check-wrap { flex-shrink: 0; padding-top: 2px; cursor: default; }
+.email-item-body { flex: 1; min-width: 0; cursor: pointer; }
 .email-item:last-child { border-bottom: none; }
 .email-item:hover { background: var(--bg-hover); }
 .email-item.active { background: var(--bg-active); }

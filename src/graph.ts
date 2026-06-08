@@ -169,6 +169,27 @@ export async function fetchEmailDetail(
   }
 }
 
+// Delete a message (Graph soft-deletes it to Deleted Items)
+export async function deleteEmail(
+  accessToken: string,
+  messageId: string
+): Promise<{ ok: boolean; error?: GraphError }> {
+  try {
+    const res = await fetch(`${GRAPH_BASE}/me/messages/${messageId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.status === 204 || res.ok) return { ok: true };
+    if (res.status === 404) return { ok: false, error: { code: 'NOT_FOUND', message: '邮件不存在' } };
+    return { ok: false, error: { code: 'GRAPH_ERROR', message: `删除失败: ${res.status}` } };
+  } catch (e) {
+    return {
+      ok: false,
+      error: { code: 'NETWORK_ERROR', message: `Network error: ${e instanceof Error ? e.message : 'unknown'}` },
+    };
+  }
+}
+
 // Remove any token-like strings from error messages
 function sanitizeErrorMessage(msg: string): string {
   // Redact anything that looks like a token (long base64/alphanumeric strings)
