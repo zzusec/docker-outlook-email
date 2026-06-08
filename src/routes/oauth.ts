@@ -3,7 +3,7 @@ import type { Env } from '../types';
 import { verifySession } from '../auth';
 import { ok, badRequest, unauthorized } from '../response';
 
-// Default client_id: Mozilla Thunderbird (public, supports Graph Mail.Read)
+// Default client_id: Mozilla Thunderbird (public). Mail.ReadWrite enables read + delete.
 const DEFAULT_CLIENT_ID = '9e5f94bc-e8a4-4e73-b8be-63364c29d753';
 const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
@@ -39,7 +39,7 @@ oauth.get('/authorize', async (c) => {
     client_id: clientId,
     response_type: 'code',
     redirect_uri: redirectUri,
-    scope: 'Mail.Read offline_access',
+    scope: 'Mail.ReadWrite offline_access',
     response_mode: 'query',
   });
   if (loginHint) params.set('login_hint', loginHint);
@@ -76,7 +76,7 @@ oauth.post('/exchange', async (c) => {
         grant_type: 'authorization_code',
         code,
         redirect_uri: redirectUri,
-        scope: 'Mail.Read offline_access',
+        scope: 'Mail.ReadWrite offline_access',
       }).toString(),
     });
 
@@ -123,7 +123,7 @@ oauth.get('/callback', async (c) => {
         grant_type: 'authorization_code',
         code: code,
         redirect_uri: redirectUri,
-        scope: 'Mail.Read offline_access',
+        scope: 'Mail.ReadWrite offline_access',
       }).toString(),
     });
 

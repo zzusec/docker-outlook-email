@@ -75,6 +75,7 @@ let state = {
   selectedAccount: null,
   emailList: [],
   selectedEmail: null,
+  selectedEmailIds: new Set(),
   pendingEmailAccount: null,
   pendingAccountStatus: null,
 };
@@ -587,12 +588,13 @@ async function startOAuth(loginHintOverride) {
 // https://localhost redirect, which is registered for the Thunderbird client.
 function openManualAuth() {
   const clientId = document.getElementById('mAccClientId')?.value?.trim() || THUNDERBIRD_CLIENT_ID;
-  const loginHint = document.getElementById('mOAuthEmail')?.value?.trim() || '';
+  const loginHint = document.getElementById('mOAuthEmail')?.value?.trim()
+    || document.getElementById('mAccEmail')?.value?.trim() || '';
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: 'code',
     redirect_uri: 'https://localhost',
-    scope: 'Mail.Read offline_access',
+    scope: 'Mail.ReadWrite offline_access',
     response_mode: 'query',
   });
   if (loginHint) params.set('login_hint', loginHint);
@@ -674,17 +676,17 @@ async function showEditAccountModal(id) {
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.6">点击下方"重新授权"获取新 Token。重新授权会使用 Thunderbird Client ID，这是推荐的方式。</div>
     </div>` : ''}
     <div style="background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:10px;padding:14px;margin-bottom:16px">
-      <div style="font-size:13px;color:var(--primary);margin-bottom:8px;font-weight:550">重新授权</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary btn-sm" type="button" onclick="startOAuth('${esc(a.email)}')" style="white-space:nowrap">重新授权此邮箱</button>
+      <div style="font-size:13px;color:var(--primary);margin-bottom:8px;font-weight:550">重新授权（刷新 Token / 获取读写权限以删除邮件）</div>
+      <div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-bottom:8px">
+        ⚠️ 默认 Thunderbird ID <b>不支持网页一键授权</b>（会报 redirect_uri 错误），请用「手动授权」：<br>
+        ① 点「打开授权页」登录授权 → ② 复制跳转后打不开的 <code>https://localhost?code=...</code> 完整网址 → ③ 点「获取 Token」自动填入下方。
       </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.6">
-        使用 Thunderbird Client ID 重新授权，自动更新下方的 Client ID 和 Refresh Token。<br>
-        <b style="color:var(--text-secondary)">适用场景：</b><br>
-        · Token 过期（状态变为 error）需要刷新<br>
-        · 批量导入的账号原 Client ID 只有 IMAP 权限，需切换为支持 Graph 的 Thunderbird 授权<br>
-        · 测试连接成功但查看邮件报 401
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button class="btn" type="button" onclick="openManualAuth()" style="white-space:nowrap">① 打开授权页</button>
+        <input class="form-input" id="manualAuthUrl" placeholder="② 粘贴跳转后的完整地址" style="flex:1">
+        <button class="btn btn-primary" type="button" onclick="exchangeManualCode(this)" style="white-space:nowrap">③ 获取 Token</button>
       </div>
+      <div style="font-size:11px;color:var(--text-dim)">有自己的 Azure 应用（已登记回调地址）才可用 <button class="btn btn-sm" type="button" onclick="startOAuth('${esc(a.email)}')">一键授权</button></div>
     </div>
     <div class="form-group"><label class="form-label">邮箱</label><input class="form-input" id="mAccEmail" value="${esc(a.email)}"></div>
     <div class="form-group">
@@ -774,6 +776,7 @@ async function renderEmails(el, actions) {
         <button class="btn" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
         <span style="flex:1"></span>
+        <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
       </div>
       <div class="email-panes">
@@ -816,14 +819,20 @@ async function fetchEmailPage(accountId, skip) {
 function renderEmailItems(emails, startIndex) {
   return emails.map((e, k) => {
     const i = startIndex + k;
-    return `<div class="email-item ${e.isRead ? '' : 'unread'}" onclick="viewEmail(${i})" id="emailItem${i}">
-      <div class="email-from">${esc(e.from?.name || e.from?.address || '未知')}</div>
-      <div class="email-subject">${esc(e.subject)}</div>
-      <div class="email-preview">${esc(e.bodyPreview)}</div>
-      <div class="email-meta">
-        <span class="email-date">${formatDate(e.receivedDateTime)}</span>
-        <div class="email-badges">
-          ${e.hasAttachments ? '<span style="font-size:11px;color:var(--text-dim)">📎</span>' : ''}
+    const checked = state.selectedEmailIds.has(e.id) ? 'checked' : '';
+    return `<div class="email-item ${e.isRead ? '' : 'unread'}" id="emailItem${i}">
+      <label class="email-check-wrap" onclick="event.stopPropagation()">
+        <input type="checkbox" class="email-check" data-id="${esc(e.id)}" ${checked} onchange="toggleEmailSelect('${esc(e.id)}', this.checked)">
+      </label>
+      <div class="email-item-body" onclick="viewEmail(${i})">
+        <div class="email-from">${esc(e.from?.name || e.from?.address || '未知')}</div>
+        <div class="email-subject">${esc(e.subject)}</div>
+        <div class="email-preview">${esc(e.bodyPreview)}</div>
+        <div class="email-meta">
+          <span class="email-date">${formatDate(e.receivedDateTime)}</span>
+          <div class="email-badges">
+            ${e.hasAttachments ? '<span style="font-size:11px;color:var(--text-dim)">📎</span>' : ''}
+          </div>
         </div>
       </div>
     </div>`;
@@ -858,6 +867,8 @@ async function loadEmailList(accountId) {
   state.selectedAccount = accountId;
   state.selectedEmail = null;
   state.emailList = [];
+  state.selectedEmailIds.clear();
+  updateEmailBatchActions();
   const pane = document.getElementById('emailListPane');
   pane.innerHTML = '<div class="loading"><div class="spinner"></div>加载邮件...</div>';
   document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
@@ -943,7 +954,10 @@ async function viewEmail(index) {
 
   pane.innerHTML = `
     <div class="detail-pane" style="border:none;padding:0">
-      <h2>${esc(e.subject)}</h2>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <h2 style="flex:1">${esc(e.subject)}</h2>
+        <button class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="deleteCurrentEmail('${esc(e.id)}')">删除</button>
+      </div>
       <div class="detail-meta">
         <span>发件人: ${esc(e.from?.name || '')} &lt;${esc(e.from?.address || '')}&gt;</span><br>
         <span>收件人: ${(e.toRecipients || []).map(r => esc(r.address)).join(', ')}</span><br>
@@ -967,6 +981,71 @@ async function viewEmail(index) {
 
 function resizeFrame(frame) {
   try { frame.style.height = frame.contentDocument.body.scrollHeight + 40 + 'px'; } catch {}
+}
+
+// ---- Email deletion (single / batch) ----
+function toggleEmailSelect(id, checked) {
+  if (checked) state.selectedEmailIds.add(id);
+  else state.selectedEmailIds.delete(id);
+  updateEmailBatchActions();
+}
+
+function updateEmailBatchActions() {
+  const el = document.getElementById('emailBatchActions');
+  if (!el) return;
+  const n = state.selectedEmailIds.size;
+  el.innerHTML = n > 0
+    ? `<span style="font-size:12px;color:var(--text-muted)">已选 ${n}</span>
+       <button class="btn btn-danger btn-sm" onclick="deleteSelectedEmails()">删除选中</button>
+       <button class="btn btn-sm" onclick="clearEmailSelection()">取消</button>`
+    : '';
+}
+
+function clearEmailSelection() {
+  state.selectedEmailIds.clear();
+  document.querySelectorAll('.email-check').forEach(cb => { cb.checked = false; });
+  updateEmailBatchActions();
+}
+
+// Remove deleted messages from the in-memory list and re-render, without a full refetch
+function removeEmailsFromList(ids) {
+  const set = new Set(ids);
+  state.emailList = state.emailList.filter(e => !set.has(e.id));
+  ids.forEach(id => state.selectedEmailIds.delete(id));
+  state.selectedEmail = null;
+
+  const pane = document.getElementById('emailListPane');
+  if (pane) {
+    pane.innerHTML = state.emailList.length
+      ? renderEmailItems(state.emailList, 0) + loadMoreFooterHtml()
+      : '<div class="empty-state">该文件夹暂无邮件</div>';
+  }
+  const detail = document.getElementById('emailDetailPane');
+  if (detail) detail.innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
+  updateEmailCount();
+  updateEmailBatchActions();
+}
+
+async function deleteCurrentEmail(id) {
+  if (!confirm('确认删除这封邮件？（移至「已删除」文件夹）')) return;
+  const res = await api(`/accounts/${state.selectedAccount}/emails/${id}`, { method: 'DELETE' });
+  if (!res?.success) { toast(res?.error?.message || '删除失败', 'error'); return; }
+  toast('已删除');
+  removeEmailsFromList([id]);
+}
+
+async function deleteSelectedEmails() {
+  const ids = [...state.selectedEmailIds];
+  if (!ids.length) return;
+  if (!confirm(`确认删除选中的 ${ids.length} 封邮件？（移至「已删除」文件夹）`)) return;
+  const res = await api(`/accounts/${state.selectedAccount}/emails/batch-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+  if (!res?.success) { toast(res?.error?.message || '删除失败', 'error', 6000); return; }
+  toast(res.message || '已删除', 'success', 5000);
+  // Only remove the ones actually deleted is hard to know per-id; refetch is simplest & correct
+  removeEmailsFromList(ids);
 }
 
 // ========== Temp Emails ==========

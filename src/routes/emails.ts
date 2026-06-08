@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { first, run } from '../db';
 import { ok, notFound, badRequest } from '../response';
-import { getAccessToken, fetchEmails, fetchEmailDetail } from '../graph';
+import { getAccessToken, fetchEmails, fetchEmailDetail, deleteEmail } from '../graph';
 
 const emails = new Hono<{ Bindings: Env }>();
 
@@ -112,6 +112,54 @@ emails.get('/:messageId', async (c) => {
     isRead: e.isRead,
     hasAttachments: e.hasAttachments,
   });
+});
+
+// POST /api/accounts/:id/emails/batch-delete  body: { ids: string[] }
+emails.post('/batch-delete', async (c) => {
+  const accountId = parseInt(c.req.param('id')!, 10);
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
+  const ids = (body.ids ?? []).filter((x) => typeof x === 'string');
+  if (!ids.length) return badRequest('请选择要删除的邮件');
+
+  const acc = await first<AccountRow>(c.env.DB, 'SELECT * FROM accounts WHERE id = ?', [accountId]);
+  if (!acc) return notFound('账号不存在');
+
+  const tokenResult = await getTokenAndRefresh(c.env.DB, acc);
+  if (!tokenResult.token) return badRequest('Graph API 认证失败');
+
+  // Cap per request: 1 token call + N deletes must stay under the 50-subrequest limit
+  const MAX = 30;
+  const targets = ids.slice(0, MAX);
+  const results = await Promise.all(targets.map((id) => deleteEmail(tokenResult.token!, id)));
+  const deleted = results.filter((r) => r.ok).length;
+  const failed = targets.length - deleted;
+  const skipped = ids.length - targets.length;
+  const forbidden = results.some((r) => r.error?.code === 'FORBIDDEN');
+
+  let msg = `已删除 ${deleted} 封`;
+  if (failed) msg += `，失败 ${failed} 封`;
+  if (skipped) msg += `，超出单次上限未处理 ${skipped} 封（请分批）`;
+  if (forbidden) msg += '。该账号为只读授权，请「编辑账号 → 重新授权」获取读写权限';
+  return ok({ deleted, failed, skipped }, msg);
+});
+
+// DELETE /api/accounts/:id/emails/:messageId
+emails.delete('/:messageId', async (c) => {
+  const accountId = parseInt(c.req.param('id')!, 10);
+  const messageId = c.req.param('messageId')!;
+
+  const acc = await first<AccountRow>(c.env.DB, 'SELECT * FROM accounts WHERE id = ?', [accountId]);
+  if (!acc) return notFound('账号不存在');
+
+  const tokenResult = await getTokenAndRefresh(c.env.DB, acc);
+  if (!tokenResult.token) return badRequest('Graph API 认证失败');
+
+  const result = await deleteEmail(tokenResult.token, messageId);
+  if (!result.ok) {
+    if (result.error?.code === 'NOT_FOUND') return notFound('邮件不存在');
+    return badRequest(result.error?.message || '删除失败');
+  }
+  return ok(null, '已删除');
 });
 
 export default emails;
