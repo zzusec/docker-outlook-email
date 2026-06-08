@@ -32,7 +32,7 @@
 - 🔐 **One-Click OAuth** — Authorize Outlook accounts via browser popup, no manual token copying
 - 🔄 **Auto Token Refresh** — Automatically saves new refresh tokens on each use, preventing expiry
 - 📦 **Batch Operations** — Import/export/delete/move in bulk, including per-row & selected export, with group & status filters
-- 📨 **Email Reading** — Read inbox / junk / deleted via Microsoft Graph API with folder switching, paginated load-more, search and HTML rendering
+- 📨 **Email Reading** — Read inbox / junk / deleted via Microsoft Graph API with folder switching, aggregated view, paginated load-more, search and HTML rendering
 - 📭 **Temp Email** — GPTMail API integration for disposable email addresses
 - 🎨 **Polished Themes** — Dark / Light / Auto with glassmorphism, circle-swoop transition & ambient breathing glow
 - 🆓 **Completely Free** — Runs on Cloudflare's free tier, no credit card needed
@@ -103,13 +103,13 @@ Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format:
 - [x] 📤 Per-row & selected export
 - [x] 📨 Email reading (live fetch, search, HTML rendering)
 - [x] 📁 Folder switching (Inbox / Junk / Deleted)
+- [x] 🔀 Aggregated view (Inbox + Junk merged by time — great for finding codes)
 - [x] 📄 Paginated load-more
 - [x] 📭 Temp email (GPTMail integration)
 - [x] 🎨 Theme switching + circle-swoop transition + breathing glow
 
 **Planned (PRs welcome)**
 
-- [ ] 🔀 Aggregated view (Inbox + Junk merged by time)
 - [ ] 🗑️ Delete emails (single / batch)
 - [ ] 📎 Attachment download
 - [ ] 🏷️ Tag system
