@@ -385,6 +385,28 @@ Client ID 只有 IMAP 权限。编辑账号 → "重新授权"切换到 Thunderb
 
 > 以上命令都作用于**线上**资源，本地无需启动 `pnpm run dev`。设完直接访问线上 URL 重新登录即可（secret 改动下次请求即生效，无需重新部署）。
 
+### 加了 `--remote` 却仍显示 `Resource location: local`（迁移没生效）
+
+用 `npm exec wrangler ... --remote` 时，**`npm exec` 会把 `--remote` 当成给自己的参数吃掉**，
+没透传给 wrangler，于是仍跑本地、报 `No migrations to apply!`。这是 `npm exec` 的行为，
+**与终端无关**（bash / cmd / PowerShell 都一样），`npx` 与 `pnpm exec` 不受影响。三种写法可解决：
+
+```bash
+# 方式一：用 npx
+npx wrangler d1 migrations apply outlook-email-db --remote
+
+# 方式二：npm exec 加 -- 分隔，后面的参数才会原样传给 wrangler
+npm exec -- wrangler d1 migrations apply outlook-email-db --remote
+
+# 用 pnpm 则没有这个问题
+pnpm exec wrangler d1 migrations apply outlook-email-db --remote
+```
+
+成功时**不再出现** `Resource location: local`，而是列出并执行迁移。
+
+> 另一个坑：别从文档/聊天里**复制** `--remote`，有些编辑器会把 `--` 自动转成长破折号 `—`，
+> wrangler 不认 → 当没传。手动敲两个连字符最稳。
+
 ### 想看线上接口的真实报错
 
 ```bash
