@@ -70,6 +70,7 @@ const API = '/api';
 let currentPage = 'accounts';
 let state = {
   groups: [],
+  tags: [],
   accounts: [],
   tempEmails: [],
   selectedAccount: null,
@@ -152,6 +153,10 @@ function renderPage() {
     case 'groups':
       title.textContent = '分组管理';
       renderGroups(content, actions);
+      break;
+    case 'tags':
+      title.textContent = '标签管理';
+      renderTags(content, actions);
       break;
     case 'emails':
       title.textContent = '邮件查看';
@@ -265,6 +270,61 @@ async function deleteGroup(id) {
   if (!confirm('确认删除该分组？该分组下的邮箱将移至默认分组。')) return;
   const res = await api(`/groups/${id}`, { method: 'DELETE' });
   if (res?.success) { toast('分组已删除'); navigate('groups'); }
+  else toast(res?.error?.message || '删除失败', 'error');
+}
+
+// ========== Tags ==========
+async function loadTags() {
+  const res = await api('/tags');
+  if (res?.success) state.tags = res.data || [];
+}
+
+async function renderTags(el, actions) {
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
+  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="showTagModal()">+ 新建标签</button>';
+  await loadTags();
+
+  if (state.tags.length === 0) {
+    el.innerHTML = '<div class="empty-state">暂无标签。标签可给一个账号打多个，用于跨分组筛选。</div>';
+    return;
+  }
+
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>标签</th><th>颜色</th><th>账号数</th><th>操作</th></tr></thead>
+    <tbody>${state.tags.map(t => `<tr>
+      <td><span class="badge" style="background:${esc(t.color)}22;color:${esc(t.color)}">${esc(t.name)}</span></td>
+      <td>${esc(t.color)}</td>
+      <td>${t.account_count ?? 0}</td>
+      <td>
+        <button class="btn btn-sm" onclick="showTagModal(${t.id})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteTag(${t.id})">删除</button>
+      </td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function showTagModal(id) {
+  const tag = id ? state.tags.find(t => t.id === id) : null;
+  showModal(tag ? '编辑标签' : '新建标签', `
+    <div class="form-group"><label class="form-label">名称</label><input class="form-input" id="mTagName" value="${esc(tag?.name ?? '')}"></div>
+    <div class="form-group"><label class="form-label">颜色</label><input type="color" id="mTagColor" value="${tag?.color ?? '#6366f1'}" style="width:60px;height:38px;border:none;background:none;cursor:pointer"></div>
+  `, async () => {
+    const name = document.getElementById('mTagName').value.trim();
+    if (!name) { toast('名称不能为空', 'error'); return false; }
+    const body = { name, color: document.getElementById('mTagColor').value };
+    const res = id
+      ? await api(`/tags/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+      : await api('/tags', { method: 'POST', body: JSON.stringify(body) });
+    if (res?.success) { toast(res.message || '操作成功'); navigate('tags'); return true; }
+    toast(res?.error?.message || '操作失败', 'error');
+    return false;
+  });
+}
+
+async function deleteTag(id) {
+  if (!confirm('确认删除该标签？已打此标签的账号会移除该标签（不影响账号本身）。')) return;
+  const res = await api(`/tags/${id}`, { method: 'DELETE' });
+  if (res?.success) { toast('标签已删除'); navigate('tags'); }
   else toast(res?.error?.message || '删除失败', 'error');
 }
 
