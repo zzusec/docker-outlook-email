@@ -4,6 +4,7 @@ import { query, run } from '../db';
 import { ok, badRequest } from '../response';
 import { hashPassword } from '../utils/crypto';
 import { maskToken } from '../utils/validation';
+import { runTokenRefresh } from '../cron';
 
 const settings = new Hono<{ Bindings: Env }>();
 
@@ -51,6 +52,12 @@ settings.delete('/external-key', async (c) => {
   return ok(null, '已停用对外 API');
 });
 
+// POST /api/settings/refresh-now - manually refresh a batch of tokens immediately
+settings.post('/refresh-now', async (c) => {
+  const summary = await runTokenRefresh(c.env, { force: true });
+  return ok({ summary }, summary);
+});
+
 // PUT /api/settings
 settings.put('/', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, string>;
@@ -91,6 +98,23 @@ settings.put('/', async (c) => {
       [body.site_title.trim()]
     );
     updated.push('站点标题');
+  }
+
+  // Scheduled token refresh config
+  const refreshKeys: Record<string, string> = {
+    token_refresh_enabled: 'enabled',
+    token_refresh_interval_hours: 'interval',
+    token_refresh_batch: 'batch',
+  };
+  for (const [key, label] of Object.entries(refreshKeys)) {
+    if (body[key] !== undefined) {
+      await run(
+        c.env.DB,
+        `INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [key, String(body[key]).trim()]
+      );
+      updated.push(`定时刷新-${label}`);
+    }
   }
 
   if (errors.length > 0) return badRequest(errors.join('；'));

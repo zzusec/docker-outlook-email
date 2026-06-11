@@ -107,18 +107,14 @@ Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format:
 - [x] 📄 Paginated load-more
 - [x] 📭 Temp email (GPTMail integration)
 - [x] 🎨 Theme switching + circle-swoop transition + breathing glow
-
 - [x] 🔑 External API + API Key (login-free email fetch for automation, see [API Docs](./docs/API.md))
-
 - [x] 🗑️ Delete emails (single / batch, soft-delete to Deleted Items)
-
 - [x] 📎 Attachment download
 - [x] 🏷️ Tag system (multiple tags per account, cross-group filtering)
+- [x] ⏰ Scheduled token refresh (Cron Trigger, configurable interval/batch, keeps accounts alive)
 
 **Planned (PRs welcome)**
 
-- [ ] 🏷️ Tag system
-- [ ] ⏰ Scheduled token refresh (Cron Trigger)
 - [ ] 🤖 Telegram push for new emails
 
 > ⚠️ Due to Cloudflare Workers platform limits, the following are not feasible: IMAP (Gmail / QQ / 163 and other non-Microsoft mailboxes), SMTP forwarding, HTTP/SOCKS5 proxy.

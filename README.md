@@ -121,18 +121,14 @@ tools/                   辅助脚本
 - [x] 📄 分页加载（加载更多）
 - [x] 📭 临时邮箱（集成 GPTMail）
 - [x] 🎨 主题切换 + 圆形扫掠过渡 + 呼吸光晕
-
 - [x] 🔑 对外 API + API Key（免登录拉取邮件，自动化取验证码，见 [API 文档](./docs/API.md)）
-
 - [x] 🗑️ 删除邮件（单条 / 批量，软删除到「已删除」）
-
 - [x] 📎 附件下载
 - [x] 🏷️ 标签系统（一个账号多标签，跨分组筛选）
+- [x] ⏰ 定时刷新 Token（Cron Trigger，可配间隔/批量，自动保活账号）
 
 **计划中（欢迎 PR）**
 
-- [ ] 🏷️ 标签系统
-- [ ] ⏰ 定时刷新 Token（Cron Trigger）
 - [ ] 🤖 Telegram 推送新邮件
 
 > ⚠️ 受 Cloudflare Workers 平台限制，以下功能无法实现：IMAP（Gmail / QQ / 163 等非微软邮箱）、SMTP 转发、HTTP/SOCKS5 代理。
