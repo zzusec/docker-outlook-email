@@ -338,6 +338,7 @@ async function loadAccounts(groupId) {
 async function renderAccounts(el, actions) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadGroups();
+  await loadTags();
   await loadAccounts();
 
   actions.innerHTML = `
@@ -356,6 +357,10 @@ async function renderAccounts(el, actions) {
       <option value="active">活跃</option>
       <option value="disabled">停用</option>
       <option value="error">异常</option>
+    </select>
+    <select class="form-select" style="width:auto;min-width:110px" id="accountTagFilter" onchange="filterAccountsByTag(this.value)">
+      <option value="">全部标签</option>
+      ${state.tags.map(t => `<option value="${t.id}">${esc(t.name)} (${t.account_count ?? 0})</option>`).join('')}
     </select>
     <input class="search-input" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
     <div style="flex:1"></div>
@@ -551,6 +556,17 @@ async function filterAccountsByGroup(gid) {
   document.getElementById('accountsBody').innerHTML = renderAccountRows(state.accounts);
 }
 
+async function filterAccountsByTag(tagId) {
+  const res = await api(`/accounts${tagId ? '?tag_id=' + tagId : ''}`);
+  if (res?.success) {
+    state.accounts = res.data || [];
+    const tbody = document.getElementById('accountsBody');
+    if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
+    const cnt = document.getElementById('accountCount');
+    if (cnt) cnt.textContent = state.accounts.length + ' 个账号';
+  }
+}
+
 let searchTimer;
 function searchAccounts(keyword) {
   clearTimeout(searchTimer);
@@ -730,6 +746,7 @@ async function showEditAccountModal(id) {
   if (!res?.success) { toast('获取账号详情失败', 'error'); return; }
   const a = res.data;
   const isError = a.status === 'error';
+  await loadTags();
   showModal('编辑账号', `
     ${isError ? `<div style="background:var(--danger-bg);border:1px solid rgba(244,63,94,0.2);border-radius:10px;padding:14px;margin-bottom:16px">
       <div style="font-size:13px;color:var(--danger);font-weight:550">该账号状态异常，Token 可能已过期</div>
@@ -762,12 +779,20 @@ async function showEditAccountModal(id) {
     <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="mAccPwd" value="${esc(a.password || '')}"></div>
     <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="mAccGroup">${state.groups.map(g => `<option value="${g.id}" ${g.id === a.group_id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
     <div class="form-group"><label class="form-label">备注</label><input class="form-input" id="mAccRemark" value="${esc(a.remark)}"></div>
+    <div class="form-group"><label class="form-label">标签</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${state.tags.length ? state.tags.map(t => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:4px 10px;border:1px solid var(--border-light);border-radius:20px;cursor:pointer">
+          <input type="checkbox" class="acc-tag-check" value="${t.id}" ${(a.tag_ids || []).includes(t.id) ? 'checked' : ''}><span style="color:${esc(t.color)}">${esc(t.name)}</span>
+        </label>`).join('') : '<span style="font-size:12px;color:var(--text-dim)">暂无标签，可去「标签管理」创建</span>'}
+      </div>
+    </div>
   `, async () => {
     const body = {
       email: document.getElementById('mAccEmail').value.trim(),
       client_id: document.getElementById('mAccClientId').value.trim(),
       group_id: parseInt(document.getElementById('mAccGroup').value),
       remark: document.getElementById('mAccRemark').value,
+      tag_ids: [...document.querySelectorAll('.acc-tag-check:checked')].map(c => parseInt(c.value)),
     };
     const token = document.getElementById('mAccToken').value.trim();
     if (token) body.refresh_token = token;
