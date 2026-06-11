@@ -10,6 +10,7 @@ import settingRoutes from './routes/settings';
 import tempEmailRoutes from './routes/tempEmails';
 import oauthRoutes from './routes/oauth';
 import externalRoutes from './routes/external';
+import tagRoutes from './routes/tags';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -50,6 +51,7 @@ app.route('/api/external', externalRoutes);
 // Protected API routes
 app.use('/api/*', authMiddleware());
 app.route('/api/groups', groupRoutes);
+app.route('/api/tags', tagRoutes);
 app.route('/api/accounts', accountRoutes);
 app.route('/api/accounts/:id/emails', emailRoutes);
 app.route('/api/settings', settingRoutes);
