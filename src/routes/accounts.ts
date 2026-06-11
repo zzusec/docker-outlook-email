@@ -26,12 +26,18 @@ function safeAccount(acc: AccountRow) {
 accounts.get('/', async (c) => {
   const groupId = c.req.query('group_id');
   const keyword = c.req.query('keyword');
+  const tagId = c.req.query('tag_id');
 
   let sql = `SELECT a.*, g.name AS group_name, g.color AS group_color
              FROM accounts a LEFT JOIN groups g ON a.group_id = g.id`;
   const params: unknown[] = [];
   const conditions: string[] = [];
 
+  if (tagId) {
+    sql += ' JOIN account_tags at ON at.account_id = a.id';
+    conditions.push('at.tag_id = ?');
+    params.push(parseInt(tagId, 10));
+  }
   if (groupId) {
     conditions.push('a.group_id = ?');
     params.push(parseInt(groupId, 10));
@@ -50,10 +56,29 @@ accounts.get('/', async (c) => {
     c.env.DB, sql, params
   );
 
+  // Attach tags per account in one query (avoid N+1)
+  const tagMap = new Map<number, { id: number; name: string; color: string }[]>();
+  const ids = rows.map((r) => r.id);
+  if (ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    const tagRows = await query<{ account_id: number; id: number; name: string; color: string }>(
+      c.env.DB,
+      `SELECT at.account_id, t.id, t.name, t.color FROM account_tags at
+       JOIN tags t ON t.id = at.tag_id WHERE at.account_id IN (${ph}) ORDER BY t.name`,
+      ids
+    );
+    for (const tr of tagRows) {
+      const list = tagMap.get(tr.account_id) ?? [];
+      list.push({ id: tr.id, name: tr.name, color: tr.color });
+      tagMap.set(tr.account_id, list);
+    }
+  }
+
   const data = rows.map((r) => ({
     ...safeAccount(r),
     group_name: r.group_name ?? '默认分组',
     group_color: r.group_color ?? '#2563eb',
+    tags: tagMap.get(r.id) ?? [],
   }));
 
   return ok(data);
@@ -212,12 +237,21 @@ accounts.get('/:id', async (c) => {
   );
   if (!acc) return notFound('账号不存在');
 
+  const tagRows = await query<{ id: number; name: string; color: string }>(
+    c.env.DB,
+    `SELECT t.id, t.name, t.color FROM tags t
+     JOIN account_tags at ON at.tag_id = t.id WHERE at.account_id = ?`,
+    [id]
+  );
+
   // For detail view, show full client_id but still mask refresh_token
   return ok({
     ...acc,
     refresh_token: maskToken(acc.refresh_token),
     group_name: acc.group_name ?? '默认分组',
     group_color: acc.group_color ?? '#2563eb',
+    tags: tagRows,
+    tag_ids: tagRows.map((t) => t.id),
   });
 });
 
@@ -235,7 +269,20 @@ accounts.put('/:id', async (c) => {
     group_id: number;
     remark: string;
     status: string;
+    tag_ids: number[];
   }>;
+
+  // Sync tags if provided (replace the full set)
+  if (Array.isArray(body.tag_ids)) {
+    await run(c.env.DB, 'DELETE FROM account_tags WHERE account_id = ?', [id]);
+    for (const tid of body.tag_ids) {
+      if (Number.isInteger(tid)) {
+        await run(c.env.DB, 'INSERT OR IGNORE INTO account_tags (account_id, tag_id) VALUES (?, ?)', [id, tid]);
+      }
+    }
+    // If only tags changed, return early
+    if (Object.keys(body).length === 1) return ok(null, '标签已更新');
+  }
 
   // Status-only update
   if (body.status && Object.keys(body).length === 1) {
@@ -283,6 +330,7 @@ accounts.delete('/:id', async (c) => {
   const existing = await first<AccountRow>(c.env.DB, 'SELECT * FROM accounts WHERE id = ?', [id]);
   if (!existing) return notFound('账号不存在');
 
+  await run(c.env.DB, 'DELETE FROM account_tags WHERE account_id = ?', [id]);
   await run(c.env.DB, 'DELETE FROM accounts WHERE id = ?', [id]);
   return ok(null, '账号已删除');
 });

@@ -113,6 +113,7 @@ Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format:
 - [x] 🗑️ Delete emails (single / batch, soft-delete to Deleted Items)
 
 - [x] 📎 Attachment download
+- [x] 🏷️ Tag system (multiple tags per account, cross-group filtering)
 
 **Planned (PRs welcome)**
 
