@@ -407,6 +407,7 @@ function renderAccountRows(accounts) {
         <a class="email-link" onclick="goToEmail(${a.id})" title="查看该账号邮件">${esc(a.email)}</a>
         <button class="btn btn-sm" style="padding:2px 6px;font-size:10px;opacity:0.6" onclick="copyText('${esc(a.email)}',this)" title="复制邮箱">复制</button>
       </div>
+      ${tagBadgesHtml(a.tags)}
     </td>
     <td><span class="color-dot" style="background:${esc(a.group_color)}"></span>${esc(a.group_name)}</td>
     <td><span class="badge badge-${a.status}">${a.status}</span></td>
@@ -864,6 +865,7 @@ async function renderEmails(el, actions) {
         <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
       </div>
+      <div id="emailAccountTags" style="padding:0 2px 8px"></div>
       <div class="email-panes">
         <div class="email-list-pane" id="emailListPane">
           <div class="empty-state">请选择一个邮箱账号</div>
@@ -954,6 +956,12 @@ async function loadEmailList(accountId) {
   state.emailList = [];
   state.selectedEmailIds.clear();
   updateEmailBatchActions();
+  // Show the selected account's tags under the toolbar
+  const tagBox = document.getElementById('emailAccountTags');
+  if (tagBox) {
+    const acc = state.accounts.find(a => String(a.id) === String(accountId));
+    tagBox.innerHTML = acc ? tagBadgesHtml(acc.tags) : '';
+  }
   const pane = document.getElementById('emailListPane');
   pane.innerHTML = '<div class="loading"><div class="spinner"></div>加载邮件...</div>';
   document.getElementById('emailDetailPane').innerHTML = '<div class="empty-state">选择一封邮件查看详情</div>';
@@ -1365,6 +1373,15 @@ function showModal(title, bodyHtml, onConfirm) {
       confirmBtn.textContent = '确定';
     }
   });
+}
+
+// Render a row of tag badges (small tag icon + name, tinted by tag color)
+function tagBadgesHtml(tags) {
+  if (!tags || !tags.length) return '';
+  const icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="9" height="9" style="flex-shrink:0"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${tags.map(t =>
+    `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:1px 7px;border-radius:10px;background:${esc(t.color)}22;color:${esc(t.color)}">${icon}${esc(t.name)}</span>`
+  ).join('')}</div>`;
 }
 
 // ========== Utilities ==========

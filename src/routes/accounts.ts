@@ -56,10 +56,29 @@ accounts.get('/', async (c) => {
     c.env.DB, sql, params
   );
 
+  // Attach tags per account in one query (avoid N+1)
+  const tagMap = new Map<number, { id: number; name: string; color: string }[]>();
+  const ids = rows.map((r) => r.id);
+  if (ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    const tagRows = await query<{ account_id: number; id: number; name: string; color: string }>(
+      c.env.DB,
+      `SELECT at.account_id, t.id, t.name, t.color FROM account_tags at
+       JOIN tags t ON t.id = at.tag_id WHERE at.account_id IN (${ph}) ORDER BY t.name`,
+      ids
+    );
+    for (const tr of tagRows) {
+      const list = tagMap.get(tr.account_id) ?? [];
+      list.push({ id: tr.id, name: tr.name, color: tr.color });
+      tagMap.set(tr.account_id, list);
+    }
+  }
+
   const data = rows.map((r) => ({
     ...safeAccount(r),
     group_name: r.group_name ?? '默认分组',
     group_color: r.group_color ?? '#2563eb',
+    tags: tagMap.get(r.id) ?? [],
   }));
 
   return ok(data);
