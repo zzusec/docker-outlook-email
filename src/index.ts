@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { authMiddleware } from './auth';
 import { fail } from './response';
+import { runTokenRefresh } from './cron';
 import authRoutes from './routes/auth';
 import groupRoutes from './routes/groups';
 import accountRoutes from './routes/accounts';
@@ -57,4 +58,10 @@ app.route('/api/accounts/:id/emails', emailRoutes);
 app.route('/api/settings', settingRoutes);
 app.route('/api/temp-emails', tempEmailRoutes);
 
-export default app;
+export default {
+  fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
+  // Cron Trigger entry: refresh a batch of account tokens (gated by settings)
+  scheduled: (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(runTokenRefresh(env));
+  },
+};
