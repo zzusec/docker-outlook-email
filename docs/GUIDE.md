@@ -285,22 +285,35 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
 
 返回的 `refresh_token` 就是你需要的值。
 
-### 自己注册 Azure 应用
+### 大多数人不需要注册 Azure 应用 ✅
 
-如果你想用自己的 Client ID（**网页一键授权必须走这一步**）：
+**首选做法：直接用默认的 Thunderbird Client ID + 「方式二：手动授权」**，免注册、免 Client Secret：
+
+添加账号弹窗 →「方式二：手动授权」→ ① 点「打开授权页」登录授权 → ② 复制跳转后打不开的
+`https://localhost?code=...` 完整网址 → ③ 点「获取 Token」自动填入。
+
+这条路对绝大多数人都够用（包括重新授权、获取读写权限删邮件）。**只有当你想用「网页一键授权」
+那个弹窗自动回填的流程时，才需要自己注册应用**（因为一键授权用的是你 Worker 的回调地址，
+默认 Thunderbird ID 没登记它）。
+
+### 自己注册 Azure 应用（仅当你要用网页一键授权）
+
+> ⚠️ **平台千万别选「Web」！** Web 属于机密客户端，微软会**强制要求 Client Secret**，
+> 而本工具用的是公共客户端流程（不传 secret），选 Web 会导致授权失败。
 
 1. 加入 [M365 开发者计划](https://developer.microsoft.com/en-us/microsoft-365/dev-program)（免费）或注册 [Azure 免费账号](https://azure.microsoft.com/free/)
 2. 打开 [Azure 应用注册](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
 3. 新注册 → 名称随意 → 账户类型选"任何组织目录和个人账户"（**必须包含个人账户**，否则 outlook.com / hotmail 无法登录）
-4. **重定向 URI**：平台选 **Web**，填入你部署的 Worker 回调地址：
+4. **身份验证 → 添加平台 → 选「移动和桌面应用程序」**（**不是 Web**），重定向 URI 填你部署的 Worker 回调地址：
    ```
    https://<你的-worker-域名>/api/oauth/callback
    ```
    例如 `https://outlook-email.xxx.workers.dev/api/oauth/callback`（也可在添加账号弹窗里点"复制回调地址"直接拿到）。
-   > 这一步是关键：网页一键授权报 `redirect_uri is not valid` 就是因为这里没登记对。
-   > 如果你只想用手动 `curl` 流程，则改填 `https://localhost`。
-5. 注册后在"概述"页面复制 **应用程序(客户端) ID**，填到添加账号弹窗的 **Client ID** 框
-6. 左侧 "API 权限" → 添加 Microsoft Graph → 委托权限 → 勾选 `Mail.Read` 和 `offline_access`
+5. 同页把**「允许公共客户端流」(Allow public client flows) 设为「是」**——这样才不需要 Client Secret。
+6. 注册后在"概述"页面复制 **应用程序(客户端) ID**，填到添加账号弹窗的 **Client ID** 框
+7. 左侧 "API 权限" → 添加 Microsoft Graph → 委托权限 → 勾选 `Mail.ReadWrite` 和 `offline_access`
+
+> 如果嫌注册麻烦，回到上面的「方式二：手动授权」即可，效果一样。
 
 ---
 
