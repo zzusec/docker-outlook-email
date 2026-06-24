@@ -379,9 +379,10 @@ Client ID 只有 IMAP 权限。编辑账号 → "重新授权"切换到 Thunderb
 
 **最常见的问题。** 你在用默认 Thunderbird Client ID 做网页一键授权，但 Thunderbird 应用没有登记你的 Worker 回调地址，微软直接拒绝。
 
-解决：[注册自己的 Azure 应用](#自己注册-azure-应用)，在重定向 URI（平台 = Web）填入
-`https://<你的-worker-域名>/api/oauth/callback`（添加账号弹窗里可一键复制），
-再把你应用的 Client ID 填进 **Client ID** 框，重新授权即可。
+最省事的解决办法：**改用「方式二：手动授权」**（默认 Thunderbird ID + `https://localhost`），免注册、免改 Azure。
+
+若坚持用网页一键授权：[注册自己的 Azure 应用](#自己注册-azure-应用)，平台选「**移动和桌面应用程序**」（**不要选 Web**），
+重定向 URI 填 `https://<你的-worker-域名>/api/oauth/callback`（弹窗里可一键复制），再把你的 Client ID 填进 **Client ID** 框。
 
 > 默认 Thunderbird ID 只适合「批量导入 / 手动填入已有 token」，不适合网页一键授权。
 
