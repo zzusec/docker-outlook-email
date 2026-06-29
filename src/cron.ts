@@ -98,7 +98,7 @@ export async function runEmailPush(env: Env, opts: { force?: boolean } = {}): Pr
 
   if (!opts.force) {
     // Interval gate so the user can throttle below the base cron rate
-    const intervalMin = parseInt((await getSetting(db, 'telegram_push_interval_minutes')) || '5', 10) || 5;
+    const intervalMin = parseInt((await getSetting(db, 'telegram_push_interval_minutes')) || '1', 10) || 1;
     const lastRun = parseInt((await getSetting(db, 'telegram_push_last_run')) || '0', 10);
     const now = Date.now();
     if (lastRun && now - lastRun < intervalMin * 60 * 1000) {
