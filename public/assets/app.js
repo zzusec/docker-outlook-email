@@ -1343,7 +1343,73 @@ async function renderSettings(el) {
         <button class="btn" type="button" onclick="refreshTokensNow(this)">立即刷新一批</button>
       </div>
     </div>
+
+    <div class="card" style="max-width:600px">
+      <h3 style="margin-bottom:8px">Telegram 推送新邮件</h3>
+      <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
+        新邮件到达时推送到 Telegram（适合实时收验证码）。需先 <a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">用 @BotFather 创建机器人</a> 拿到 Bot Token，再给机器人发条消息后用 <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，推送延迟取决于邮件到达时刻与下一次唤醒的间隔，平均约 2~3 分钟、最长约 5 分钟；下面的「间隔」默认 1（每次唤醒都推，即最快），设得比 5 大则进一步拉长。
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="sTgEnabled" ${settings.telegram_push_enabled === '1' ? 'checked' : ''}> 启用推送
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Bot Token</label>
+        <input class="form-input" id="sTgToken" value="${esc(settings.telegram_bot_token || '')}" placeholder="123456:ABC-DEF..." style="font-family:monospace;font-size:12px">
+      </div>
+      <div style="display:flex;gap:12px">
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Chat ID</label>
+          <input class="form-input" id="sTgChatId" value="${esc(settings.telegram_chat_id || '')}" placeholder="例如 123456789">
+        </div>
+        <div class="form-group" style="flex:1">
+          <label class="form-label">间隔（分钟）</label>
+          <input class="form-input" id="sTgInterval" type="number" min="1" value="${esc(settings.telegram_push_interval_minutes || '1')}">
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">上次执行：${esc(settings.telegram_push_last_result || '尚未执行')}</div>
+      <div style="background:var(--warning-bg);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--text-secondary);line-height:1.8">
+        <b style="color:var(--warning)">⚠️ 说明</b><br>
+        · 通过<b>轮询</b>实现（非微软实时推送），延迟取决于邮件到达与下次唤醒的间隔，<b>平均约 2~3 分钟、最长约 5 分钟</b>；间隔设得比 5 大则进一步拉长。<br>
+        · 受子请求限制，每轮最多扫描 8 个账号、每账号最多推 3 条；账号多时按最久未扫优先轮换。<br>
+        · 首次为每个账号只记录水位、<b>不补推历史邮件</b>，之后只推新到达的邮件。
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" type="button" onclick="saveTelegramSettings()">保存</button>
+        <button class="btn" type="button" onclick="testTelegram(this)">发送测试消息</button>
+        <button class="btn" type="button" onclick="pushNow(this)">立即推送一轮</button>
+      </div>
+    </div>
   `;
+}
+
+async function saveTelegramSettings() {
+  const body = {
+    telegram_push_enabled: document.getElementById('sTgEnabled').checked ? '1' : '0',
+    telegram_bot_token: document.getElementById('sTgToken').value.trim(),
+    telegram_chat_id: document.getElementById('sTgChatId').value.trim(),
+    telegram_push_interval_minutes: document.getElementById('sTgInterval').value.trim() || '1',
+  };
+  const res = await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
+  if (res?.success) toast(res.message || '已保存');
+  else toast(res?.error?.message || '保存失败', 'error');
+}
+
+async function testTelegram(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '发送中...'; }
+  const res = await api('/settings/telegram-test', { method: 'POST' });
+  if (btn) { btn.disabled = false; btn.textContent = '发送测试消息'; }
+  if (res?.success) toast(res.message || '已发送', 'success', 5000);
+  else toast(res?.error?.message || '发送失败', 'error');
+}
+
+async function pushNow(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '推送中...'; }
+  const res = await api('/settings/push-now', { method: 'POST' });
+  if (btn) { btn.disabled = false; btn.textContent = '立即推送一轮'; }
+  if (res?.success) { toast(res.message || '已执行', 'success', 5000); navigate('settings'); }
+  else toast(res?.error?.message || '推送失败', 'error');
 }
 
 async function saveRefreshSettings() {
