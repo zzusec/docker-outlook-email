@@ -1347,7 +1347,7 @@ async function renderSettings(el) {
     <div class="card" style="max-width:600px">
       <h3 style="margin-bottom:8px">Telegram 推送新邮件</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
-        新邮件到达时推送到 Telegram（适合实时收验证码）。需先 <a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">用 @BotFather 创建机器人</a> 拿到 Bot Token，再给机器人发条消息后用 <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，所以最快约 5 分钟一轮；下面的「间隔」用于在此基础上拉长（设 1 表示每次唤醒都推，即最快）。
+        新邮件到达时推送到 Telegram（适合实时收验证码）。需先 <a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">用 @BotFather 创建机器人</a> 拿到 Bot Token，再给机器人发条消息后用 <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，推送延迟取决于邮件到达时刻与下一次唤醒的间隔，平均约 2~3 分钟、最长约 5 分钟；下面的「间隔」默认 1（每次唤醒都推，即最快），设得比 5 大则进一步拉长。
       </div>
       <div class="form-group" style="display:flex;align-items:center;gap:10px">
         <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
@@ -1371,7 +1371,7 @@ async function renderSettings(el) {
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">上次执行：${esc(settings.telegram_push_last_result || '尚未执行')}</div>
       <div style="background:var(--warning-bg);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--text-secondary);line-height:1.8">
         <b style="color:var(--warning)">⚠️ 说明</b><br>
-        · 通过<b>轮询</b>实现（非微软实时推送），延迟最短约 5 分钟（受 Cloudflare 唤醒频率限制）；间隔设得比 5 大则按间隔进一步拉长。<br>
+        · 通过<b>轮询</b>实现（非微软实时推送），延迟取决于邮件到达与下次唤醒的间隔，<b>平均约 2~3 分钟、最长约 5 分钟</b>；间隔设得比 5 大则进一步拉长。<br>
         · 受子请求限制，每轮最多扫描 8 个账号、每账号最多推 3 条；账号多时按最久未扫优先轮换。<br>
         · 首次为每个账号只记录水位、<b>不补推历史邮件</b>，之后只推新到达的邮件。
       </div>
