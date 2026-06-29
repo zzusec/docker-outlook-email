@@ -4,7 +4,8 @@ import { query, run } from '../db';
 import { ok, badRequest } from '../response';
 import { hashPassword } from '../utils/crypto';
 import { maskToken } from '../utils/validation';
-import { runTokenRefresh } from '../cron';
+import { runTokenRefresh, runEmailPush } from '../cron';
+import { sendTelegramMessage } from '../telegram';
 
 const settings = new Hono<{ Bindings: Env }>();
 
@@ -17,7 +18,7 @@ settings.get('/', async (c) => {
     // Mask sensitive values
     if (row.key === 'login_password_hash') {
       data['login_password'] = '******';
-    } else if (row.key === 'gptmail_api_key') {
+    } else if (row.key === 'gptmail_api_key' || row.key === 'telegram_bot_token') {
       data[row.key] = row.value ? maskToken(row.value) : '';
     } else {
       // external_api_key is returned in full so the admin can copy it (page is behind login)
@@ -56,6 +57,32 @@ settings.delete('/external-key', async (c) => {
 settings.post('/refresh-now', async (c) => {
   const summary = await runTokenRefresh(c.env, { force: true });
   return ok({ summary }, summary);
+});
+
+// POST /api/settings/push-now - manually run the Telegram email push immediately
+settings.post('/push-now', async (c) => {
+  const summary = await runEmailPush(c.env, { force: true });
+  return ok({ summary }, summary);
+});
+
+// POST /api/settings/telegram-test - send a test message with the saved bot/chat config
+settings.post('/telegram-test', async (c) => {
+  const rows = await query<SettingRow>(
+    c.env.DB,
+    "SELECT key, value FROM settings WHERE key IN ('telegram_bot_token', 'telegram_chat_id')"
+  );
+  const cfg: Record<string, string> = {};
+  for (const r of rows) cfg[r.key] = r.value;
+  if (!cfg.telegram_bot_token || !cfg.telegram_chat_id) {
+    return badRequest('请先填写并保存 Bot Token 和 Chat ID');
+  }
+  const r = await sendTelegramMessage(
+    cfg.telegram_bot_token,
+    cfg.telegram_chat_id,
+    '✅ Outlook Email Manager 测试消息：Telegram 推送配置成功。'
+  );
+  if (!r.ok) return badRequest(`发送失败：${r.error}`);
+  return ok(null, '测试消息已发送，请检查 Telegram');
 });
 
 // PUT /api/settings
@@ -98,6 +125,33 @@ settings.put('/', async (c) => {
       [body.site_title.trim()]
     );
     updated.push('站点标题');
+  }
+
+  // Telegram bot token: skip if the value still looks masked (unchanged in UI)
+  if (body.telegram_bot_token !== undefined && !body.telegram_bot_token.includes('*')) {
+    await run(
+      c.env.DB,
+      `INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('telegram_bot_token', ?, CURRENT_TIMESTAMP)`,
+      [body.telegram_bot_token.trim()]
+    );
+    updated.push('Telegram Bot Token');
+  }
+
+  // Other Telegram push config (plain values)
+  const telegramKeys: Record<string, string> = {
+    telegram_push_enabled: 'enabled',
+    telegram_chat_id: 'chat-id',
+    telegram_push_interval_minutes: 'interval',
+  };
+  for (const [key, label] of Object.entries(telegramKeys)) {
+    if (body[key] !== undefined) {
+      await run(
+        c.env.DB,
+        `INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+        [key, String(body[key]).trim()]
+      );
+      updated.push(`Telegram-${label}`);
+    }
   }
 
   // Scheduled token refresh config
