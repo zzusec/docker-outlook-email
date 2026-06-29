@@ -126,10 +126,11 @@ tools/                   辅助脚本
 - [x] 📎 附件下载
 - [x] 🏷️ 标签系统（一个账号多标签，跨分组筛选）
 - [x] ⏰ 定时刷新 Token（Cron Trigger，可配间隔/批量，自动保活账号）
+- [x] 🤖 Telegram 推送新邮件（Cron 轮询，新邮件实时推送到 Telegram，可配间隔）
 
 **计划中（欢迎 PR）**
 
-- [ ] 🤖 Telegram 推送新邮件
+- [ ] 🔔 更多推送渠道（企业微信 / 钉钉等）
 
 > ⚠️ 受 Cloudflare Workers 平台限制，以下功能无法实现：IMAP（Gmail / QQ / 163 等非微软邮箱）、SMTP 转发、HTTP/SOCKS5 代理。
 
