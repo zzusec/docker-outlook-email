@@ -1,6 +1,6 @@
 import type { Env, AccountRow } from './types';
 import { query, first, run } from './db';
-import { getAccessToken, fetchEmails } from './graph';
+import { getAccessToken, getMailAccessToken, fetchEmails } from './graph';
 import { sendTelegramMessage, escapeHtml } from './telegram';
 
 // Hard cap per run: each account = 1 subrequest (token refresh); free plan allows 50/invocation
@@ -116,7 +116,8 @@ export async function runEmailPush(env: Env, opts: { force?: boolean } = {}): Pr
   let sent = 0;
   let failedAccounts = 0;
   for (const acc of accounts) {
-    const tok = await getAccessToken(acc.client_id, acc.refresh_token);
+    // Mail path: upgrade IMAP-only RTs so Telegram push can actually read mail.
+    const tok = await getMailAccessToken(acc.client_id, acc.refresh_token);
     if (!tok.token) {
       failedAccounts++;
       // Mark error so the UI surfaces dead tokens; bump updated_at so the next

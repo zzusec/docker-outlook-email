@@ -2,16 +2,17 @@ import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { first, run } from '../db';
 import { ok, notFound, badRequest } from '../response';
-import { getAccessToken, fetchEmails, fetchEmailDetail, deleteEmail, listAttachments, getAttachment } from '../graph';
+import { getMailAccessToken, fetchEmails, fetchEmailDetail, deleteEmail, listAttachments, getAttachment } from '../graph';
 
 const emails = new Hono<{ Bindings: Env }>();
 
-// Helper: get token and auto-save rotated refresh_token
+// Helper: get token and auto-save rotated refresh_token.
+// Also upgrades IMAP-only RTs to Graph Mail so bulk-imported Hotmail works.
 async function getTokenAndRefresh(
   db: D1Database,
   acc: AccountRow
 ): Promise<{ token?: string; error?: string }> {
-  const result = await getAccessToken(acc.client_id, acc.refresh_token);
+  const result = await getMailAccessToken(acc.client_id, acc.refresh_token);
 
   if (!result.token) {
     await run(db, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', acc.id]);

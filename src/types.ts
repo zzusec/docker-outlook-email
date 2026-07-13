@@ -65,6 +65,7 @@ export interface GraphTokenResponse {
   token_type: string;
   expires_in: number;
   refresh_token?: string;
+  scope?: string;
 }
 
 export interface GraphMailMessage {

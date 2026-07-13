@@ -14,6 +14,49 @@ function createMockDB() {
   };
 }
 
+describe('IMAP→Graph mail token upgrade', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('detects IMAP-only scopes and upgrades them to Graph Mail on mail access', async () => {
+    const { isImapOnlyScope, getMailAccessToken } = await import('../src/graph');
+
+    expect(isImapOnlyScope(
+      'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/SMTP.Send'
+    )).toBe(true);
+    expect(isImapOnlyScope('https://graph.microsoft.com/Mail.Read openid profile')).toBe(false);
+    expect(isImapOnlyScope(undefined)).toBe(false);
+
+    vi.stubGlobal('fetch', vi.fn()
+      // first: IMAP-only refresh
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: 'imap-access',
+        refresh_token: 'rt-after-imap',
+        scope: 'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/SMTP.Send',
+      })))
+      // second: Graph upgrade
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: 'graph-access',
+        refresh_token: 'rt-after-graph',
+        scope: 'https://graph.microsoft.com/Mail.ReadWrite openid profile',
+      }))));
+
+    const result = await getMailAccessToken('client-id', 'rt-original');
+    expect(result.token).toBe('graph-access');
+    expect(result.newRefreshToken).toBe('rt-after-graph');
+    expect(result.upgraded).toBe(true);
+    expect(result.scope).toContain('Mail.ReadWrite');
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // Second call must request Graph scopes
+    const secondBody = String((fetch as any).mock.calls[1][1].body);
+    expect(secondBody).toContain(encodeURIComponent('https://graph.microsoft.com/Mail.ReadWrite'));
+    expect(secondBody).toContain('rt-after-imap');
+  });
+});
+
 // Test crypto utilities
 describe('crypto utils', () => {
   it('hashPassword produces consistent hex output', async () => {

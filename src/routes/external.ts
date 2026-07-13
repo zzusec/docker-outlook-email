@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { first, run } from '../db';
 import { ok, fail } from '../response';
-import { getAccessToken, fetchEmails } from '../graph';
+import { getMailAccessToken, fetchEmails } from '../graph';
 
 // External API: fetch emails by API key, no login required.
 // Mounted BEFORE the cookie auth middleware so it is not gated by sessions.
@@ -43,7 +43,7 @@ external.get('/emails', async (c) => {
   if (!acc) return fail('NOT_FOUND', '账号不存在', 404);
   if (acc.status === 'disabled') return fail('DISABLED', '该账号已停用', 400);
 
-  const tok = await getAccessToken(acc.client_id, acc.refresh_token);
+  const tok = await getMailAccessToken(acc.client_id, acc.refresh_token);
   if (!tok.token) {
     await run(c.env.DB, "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
     return fail('TOKEN_FAILED', tok.error?.message || 'Token 获取失败', 502);

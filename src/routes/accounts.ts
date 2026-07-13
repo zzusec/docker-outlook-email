@@ -3,7 +3,7 @@ import type { Env, AccountRow } from '../types';
 import { query, first, run, batchRun, chunk, D1_MAX_BOUND_PARAMS } from '../db';
 import { ok, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
-import { fetchEmails, getAccessToken, getInboxTotal, type GraphError } from '../graph';
+import { fetchEmails, getMailAccessToken, getInboxTotal, type GraphError } from '../graph';
 
 const accounts = new Hono<{ Bindings: Env }>();
 
@@ -45,7 +45,7 @@ async function probeAccount(acc: AccountRow): Promise<AccountProbeResult> {
     total: acc.inbox_total ?? null,
     checked_at: acc.inbox_count_updated_at ?? null,
   };
-  const tokenResult = await getAccessToken(acc.client_id, acc.refresh_token);
+  const tokenResult = await getMailAccessToken(acc.client_id, acc.refresh_token);
 
   if (!tokenResult.token) {
     return {
@@ -379,7 +379,7 @@ accounts.post('/batch', async (c) => {
         results.push({ id, email: '', refreshed: false, error: { code: 'NOT_FOUND', message: '账号不存在' } });
         continue;
       }
-      const tokenResult = await getAccessToken(account.client_id, account.refresh_token);
+      const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
       if (!tokenResult.token) {
         await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', id]);
         results.push({ id, email: account.email, refreshed: false, error: tokenResult.error });

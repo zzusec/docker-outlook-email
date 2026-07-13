@@ -19,24 +19,43 @@ function encodePathId(id: string): string {
   return encodeURIComponent(id);
 }
 
+// Prefer Graph mail scopes. Many bulk-imported Hotmail RTs were originally
+// authorized only for IMAP/POP/SMTP; requesting Graph scopes on refresh is an
+// incremental-consent upgrade that permanently switches the RT to Graph mail.
+export const GRAPH_MAIL_UPGRADE_SCOPE =
+  'https://graph.microsoft.com/Mail.ReadWrite offline_access openid profile';
+
+export function isImapOnlyScope(scope?: string): boolean {
+  if (!scope) return false;
+  const s = scope.toLowerCase();
+  if (s.includes('mail.read') || s.includes('mail.readwrite')) return false;
+  return (
+    s.includes('imap.accessasuser') ||
+    s.includes('pop.accessasuser') ||
+    // SMTP-only / outlook resource without mail.read
+    (s.includes('outlook.office.com') && !s.includes('mail.read'))
+  );
+}
+
 // Get access token using refresh_token.
 // Returns new_refresh_token when Microsoft issues a rotated token.
 //
-// Scope is intentionally OMITTED on the refresh grant:
-//   - Microsoft reuses the original authorized scopes (incl. offline_access)
-//   - https://graph.microsoft.com/.default is wrong for delegated refresh:
-//       offline_access is an OIDC scope and is NOT part of Graph .default.
-//   - Hardcoding Mail.ReadWrite would break tokens that only have Mail.Read.
+// Default (no scope): Microsoft reuses the original authorized scopes.
+// Optional scope: used to upgrade IMAP-only RTs to Graph Mail.ReadWrite.
+// Never use https://graph.microsoft.com/.default for delegated refresh —
+// offline_access is an OIDC scope and is not part of Graph .default.
 export async function getAccessToken(
   clientId: string,
-  refreshToken: string
-): Promise<{ token?: string; newRefreshToken?: string; error?: GraphError }> {
+  refreshToken: string,
+  scope?: string
+): Promise<{ token?: string; newRefreshToken?: string; scope?: string; error?: GraphError }> {
   try {
     const body = new URLSearchParams({
       client_id: clientId,
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
     });
+    if (scope) body.set('scope', scope);
 
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
@@ -60,6 +79,7 @@ export async function getAccessToken(
     return {
       token: data.access_token,
       newRefreshToken: data.refresh_token,
+      scope: data.scope,
     };
   } catch (e) {
     return {
@@ -69,6 +89,47 @@ export async function getAccessToken(
       },
     };
   }
+}
+
+// Token for reading/writing mail. Auto-upgrades IMAP/POP-only refresh tokens
+// to Graph Mail.ReadWrite when Microsoft allows incremental consent.
+export async function getMailAccessToken(
+  clientId: string,
+  refreshToken: string
+): Promise<{
+  token?: string;
+  newRefreshToken?: string;
+  scope?: string;
+  upgraded?: boolean;
+  error?: GraphError;
+}> {
+  const first = await getAccessToken(clientId, refreshToken);
+  if (!first.token) return first;
+
+  if (!isImapOnlyScope(first.scope)) {
+    return first;
+  }
+
+  const rtForUpgrade = first.newRefreshToken || refreshToken;
+  const upgraded = await getAccessToken(clientId, rtForUpgrade, GRAPH_MAIL_UPGRADE_SCOPE);
+  if (!upgraded.token) {
+    // Keep the original access token so callers can still surface a clear 401
+    // from the mail API rather than a cryptic upgrade failure.
+    return {
+      token: first.token,
+      newRefreshToken: first.newRefreshToken,
+      scope: first.scope,
+      error: upgraded.error,
+    };
+  }
+
+  return {
+    token: upgraded.token,
+    // Prefer the latest rotated RT (upgrade step), else the first rotation.
+    newRefreshToken: upgraded.newRefreshToken || first.newRefreshToken,
+    scope: upgraded.scope,
+    upgraded: true,
+  };
 }
 
 // ---- Response shape normalizers (Outlook REST uses PascalCase) ----
