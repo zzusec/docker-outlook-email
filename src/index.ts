@@ -66,10 +66,17 @@ app.route('/api/temp-emails', tempEmailRoutes);
 
 export default {
   fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
-  // Cron Trigger entry: refresh a batch of account tokens (gated by settings)
+  // Cron Trigger entry: token keep-alive + new-email push (gated by settings).
+  // MUST run sequentially: both jobs call getAccessToken on the same oldest
+  // accounts. Microsoft rotates refresh tokens on use; concurrent refresh with
+  // the same RT invalidates one of them and the losing path marks the account
+  // as error — which is exactly why "刷新 Token" looked useless.
   scheduled: (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
-    // Two independent gated jobs share the wake-up: token keep-alive + new-email push.
-    ctx.waitUntil(runTokenRefresh(env));
-    ctx.waitUntil(runEmailPush(env));
+    ctx.waitUntil(
+      (async () => {
+        await runTokenRefresh(env);
+        await runEmailPush(env);
+      })()
+    );
   },
 };

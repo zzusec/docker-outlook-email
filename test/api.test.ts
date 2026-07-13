@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock D1 database
 function createMockDB() {
@@ -128,5 +128,108 @@ describe('verifyPassword', () => {
 
     const result = await verifyPassword(mockDB as any, 'wrong', 'admin123');
     expect(result).toBe(false);
+  });
+});
+
+describe('account connection tests', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('verifies Inbox access, persists a rotated token, and keeps an empty Inbox count', async () => {
+    const account = {
+      id: 1,
+      email: 'empty@outlook.com',
+      client_id: 'client-id',
+      refresh_token: 'old-token',
+      password: '',
+      group_id: 1,
+      remark: '',
+      status: 'active',
+      inbox_total: null,
+      inbox_count_updated_at: null,
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+    };
+    const statement = {
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn().mockResolvedValue(account),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+      run: vi.fn().mockResolvedValue({}),
+    };
+    const db = {
+      prepare: vi.fn(() => statement),
+      batch: vi.fn().mockResolvedValue([]),
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-token', refresh_token: 'new-token' })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ totalItemCount: 0 }))));
+
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/1/test', { method: 'POST' }),
+      { DB: db } as any
+    );
+    const body = await res.json() as { success: boolean; data: { connected: boolean; inbox: { total: number; checked_at: string } } };
+
+    expect(body.success).toBe(true);
+    expect(body.data.connected).toBe(true);
+    expect(body.data.inbox.total).toBe(0);
+    expect(body.data.inbox.checked_at).toBeTruthy();
+    expect(db.batch).toHaveBeenCalledTimes(1);
+    expect(statement.bind).toHaveBeenLastCalledWith('new-token', 'active', 0, body.data.inbox.checked_at, 1);
+  });
+
+  it('rejects a connection-test batch larger than ten accounts', async () => {
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test', ids: Array.from({ length: 11 }, (_, i) => i + 1) }),
+      }),
+      { DB: {} } as any
+    );
+    const body = await res.json() as { success: boolean; error: { message: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.message).toContain('最多测试 10 个账号');
+  });
+
+  it('rejects the removed local password batch action', async () => {
+    const db = { prepare: vi.fn(), batch: vi.fn() };
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_password', ids: [1, 2] }),
+      }), { DB: db } as any
+    );
+    const body = await res.json() as { success: boolean; error: { message: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.message).toContain('未知操作');
+    expect(db.batch).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed token input before writing credentials', async () => {
+    const db = { prepare: vi.fn(), batch: vi.fn() };
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_tokens', ids: [1], token_data: 'not-a-valid-token-line' }),
+      }), { DB: db } as any
+    );
+    const body = await res.json() as { success: boolean; error: { message: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.message).toContain('格式错误');
+    expect(db.batch).not.toHaveBeenCalled();
   });
 });

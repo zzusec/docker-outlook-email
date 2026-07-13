@@ -12,8 +12,8 @@ database_name = "outlook-email-db"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 migrations_dir = "migrations"
 
-# Scheduled token refresh. This is just the BASE wake-up rate (every 6h);
-# the actual interval / batch / on-off is controlled in 系统设置 at runtime.
+# Base wake-up rate for token keep-alive + Telegram push (every 5 min).
+# Effective interval / batch / on-off is controlled in 系统设置 at runtime.
 # Free plan allows up to 5 cron triggers per account.
 [triggers]
-crons = ["0 */6 * * *"]
+crons = ["*/5 * * * *"]

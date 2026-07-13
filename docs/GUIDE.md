@@ -171,6 +171,16 @@ https://outlook-email.你的用户名.workers.dev
 2. 每行一个账号，格式：`邮箱----密码----client_id----refresh_token`
 3. 选择分组，点击 **"确定"**
 
+### 测试连接、收件箱总数与失败处理
+
+- 在「邮箱账号」页勾选一个或多个账号后，点击 **“批量测试连接”**。系统会依次验证 Refresh Token、实际收件箱读取权限，并读取收件箱项目总数。
+- 为避免触发 Microsoft Graph 限流，前端每次只提交 10 个账号，多个批次会按顺序执行。
+- 邮箱地址右侧的 **“收件箱 N”** 是最近一次成功测试时读取到的总数；`收件箱 0` 表示空收件箱，`收件箱 —` 表示尚未成功获取。点击邮箱地址本身可直接进入该账号的收件箱。
+- 批量结果会列出连接失败的账号。可逐个点 **“重新授权”** 打开现有授权界面，或在确认后点击 **“删除失败账号”**。总数读取临时失败但邮件读取正常的账号不会被列为失败账号。
+- 工具栏可按 **有邮件 / 空收件箱 / 未获取** 筛选；筛选依据是最近一次成功测试的缓存总数，不会额外请求 Microsoft Graph。
+- **批量更新 Token**：先选中账号，再粘贴每行 `邮箱----refresh_token`。内容必须与选中账号一一对应；更新后会清除旧收件箱总数，应再执行批量测试连接。
+- 邮件读取只使用 `client_id` 与 `refresh_token`。本工具不能修改 Outlook.com/Hotmail 的真实密码；请不要在本工具保存 Microsoft 账户密码，真实密码请在 Microsoft 账户安全设置中修改。
+
 ---
 
 ## 本地开发
@@ -223,12 +233,12 @@ Client ID 是在 Microsoft Azure 注册应用时生成的唯一标识。它不�
 
 可以。只要该应用在 Azure 注册时配置了 `Mail.Read` 权限就行。
 
-**注意：** 仅有 IMAP 权限的 Client ID 会导致"测试连接成功但查看邮件报 401"。遇到这种情况，编辑账号 → 点"重新授权此邮箱"即可。
+**注意：** 仅有 IMAP 权限的 Client ID 无法读取 Graph 邮件。当前连接测试会实际读取收件箱，因此会直接报告失败。遇到这种情况，编辑账号 → 点“重新授权”即可。
 
 | 权限类型 | 测试连接 | 读邮件 |
 |----------|:--------:|:------:|
 | Graph Mail.Read | ✅ | ✅ |
-| 仅 IMAP | ✅ | ❌ (401) |
+| 仅 IMAP | ❌ | ❌ (401) |
 
 ---
 
@@ -370,7 +380,7 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
 | `/api/groups/:id` | PUT/DELETE | 修改/删除分组 |
 | `/api/accounts` | GET/POST | 账号列表/添加 |
 | `/api/accounts/export` | GET | 导出账号 |
-| `/api/accounts/batch` | POST | 批量操作 |
+| `/api/accounts/batch` | POST | 批量移动、启停、删除或连接测试 |
 | `/api/accounts/:id` | GET/PUT/DELETE | 账号详情/修改/删除 |
 | `/api/accounts/:id/test` | POST | 测试连接 |
 | `/api/accounts/:id/emails` | GET | 邮件列表 |
@@ -413,9 +423,9 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
 
 Token 已过期。编辑账号 → 点"重新授权此邮箱"获取新 token。
 
-### 测试连接成功但读邮件 401
+### 测试连接失败 / 读邮件 401
 
-Client ID 只有 IMAP 权限。编辑账号 → "重新授权"切换到 Thunderbird 授权。
+Client ID 可能只有 IMAP 权限或没有 Graph Mail 权限。批量测试结果中点“重新授权”，或编辑账号 → “重新授权”切换到 Thunderbird 授权。
 
 ### 一键授权报 `invalid_request ... redirect_uri is not valid`
 
@@ -527,6 +537,6 @@ pnpm exec wrangler tail   # 保持开着，再点一次出错的操作，终端�
 5. 批量导入账号
 6. 邮件查看 → 选择账号 → 查看列表 → 查看详情
 7. 导出账号 → 复制/下载
-8. 批量选中 → 移动分组/停用/删除
+8. 批量选中 → 移动分组/停用/测试连接；确认收件箱总数显示正确，并在失败结果中测试重新授权或删除
 9. 修改设置 → 退出 → 用新密码登录
 10. 切换深色/浅色/自动主题

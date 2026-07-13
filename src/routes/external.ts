@@ -48,13 +48,16 @@ external.get('/emails', async (c) => {
     await run(c.env.DB, "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
     return fail('TOKEN_FAILED', tok.error?.message || 'Token 获取失败', 502);
   }
-  // Persist a rotated refresh_token if Microsoft issued one
+  // Always persist a rotated refresh_token; Microsoft invalidates the old one.
+  // Also clear prior error status when the token works again.
   if (tok.newRefreshToken && tok.newRefreshToken !== acc.refresh_token) {
     await run(
       c.env.DB,
       "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [tok.newRefreshToken, acc.id]
     );
+  } else if (acc.status !== 'active') {
+    await run(c.env.DB, "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
   }
 
   const result = await fetchEmails(tok.token, { folder, top, skip: 0, keyword });

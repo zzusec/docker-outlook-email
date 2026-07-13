@@ -119,7 +119,28 @@ export async function runEmailPush(env: Env, opts: { force?: boolean } = {}): Pr
     const tok = await getAccessToken(acc.client_id, acc.refresh_token);
     if (!tok.token) {
       failedAccounts++;
+      // Mark error so the UI surfaces dead tokens; bump updated_at so the next
+      // push round rotates to other accounts instead of hammering the same 8.
+      await run(db, "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
       continue;
+    }
+
+    // Always persist a rotated refresh_token. Microsoft invalidates the old one
+    // after a successful refresh; dropping the new value kills the account.
+    // Also bump updated_at so ORDER BY updated_at ASC actually rotates coverage
+    // across many accounts (previously the same oldest 8 were stuck forever).
+    if (tok.newRefreshToken && tok.newRefreshToken !== acc.refresh_token) {
+      await run(
+        db,
+        "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [tok.newRefreshToken, acc.id]
+      );
+    } else {
+      await run(
+        db,
+        "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [acc.id]
+      );
     }
 
     const stateRow = await first<PushStateRow>(

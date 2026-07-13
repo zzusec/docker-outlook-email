@@ -79,6 +79,8 @@ let state = {
   selectedEmailIds: new Set(),
   pendingEmailAccount: null,
   pendingAccountStatus: null,
+  emailReturnContext: null,
+  pendingAccountFilterRestore: null,
 };
 
 // ========== API Helpers ==========
@@ -335,6 +337,38 @@ async function loadAccounts(groupId) {
   if (res?.success) state.accounts = res.data || [];
 }
 
+function getAccountFilterContext() {
+  return {
+    groupId: document.getElementById('accountGroupFilter')?.value || '',
+    status: document.getElementById('accountStatusFilter')?.value || '',
+    inbox: document.getElementById('accountInboxFilter')?.value || '',
+    tagId: document.getElementById('accountTagFilter')?.value || '',
+    keyword: document.getElementById('accountSearchFilter')?.value || '',
+  };
+}
+
+function applyAccountFilterContext(filters) {
+  const values = [
+    ['accountGroupFilter', filters.groupId],
+    ['accountStatusFilter', filters.status],
+    ['accountInboxFilter', filters.inbox],
+    ['accountTagFilter', filters.tagId],
+    ['accountSearchFilter', filters.keyword],
+  ];
+  values.forEach(([id, value]) => {
+    const control = document.getElementById(id);
+    if (control) control.value = value || '';
+  });
+}
+
+function accountFilterParams(filters) {
+  const params = new URLSearchParams();
+  if (filters.groupId) params.set('group_id', filters.groupId);
+  if (filters.tagId) params.set('tag_id', filters.tagId);
+  if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
+  return params;
+}
+
 async function renderAccounts(el, actions) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadGroups();
@@ -348,21 +382,27 @@ async function renderAccounts(el, actions) {
   `;
 
   const toolbar = `<div class="toolbar">
-    <select class="form-select" style="width:auto;min-width:140px" id="accountGroupFilter" onchange="filterAccountsByGroup(this.value)">
+    <select class="form-select" style="width:auto;min-width:140px" id="accountGroupFilter" onchange="onAccountFilterChange()">
       <option value="">全部分组</option>
       ${state.groups.map(g => `<option value="${g.id}">${esc(g.name)} (${g.account_count ?? 0})</option>`).join('')}
     </select>
-    <select class="form-select" style="width:auto;min-width:110px" id="accountStatusFilter" onchange="filterAccountsByStatus(this.value)">
+    <select class="form-select" style="width:auto;min-width:110px" id="accountStatusFilter" onchange="onAccountFilterChange()">
       <option value="">全部状态</option>
       <option value="active">活跃</option>
       <option value="disabled">停用</option>
       <option value="error">异常</option>
     </select>
-    <select class="form-select" style="width:auto;min-width:110px" id="accountTagFilter" onchange="filterAccountsByTag(this.value)">
+    <select class="form-select" style="width:auto;min-width:120px" id="accountInboxFilter" onchange="onAccountFilterChange()">
+      <option value="">全部收件箱</option>
+      <option value="has_mail">有邮件</option>
+      <option value="empty">空收件箱</option>
+      <option value="unknown">未获取</option>
+    </select>
+    <select class="form-select" style="width:auto;min-width:110px" id="accountTagFilter" onchange="onAccountFilterChange()">
       <option value="">全部标签</option>
       ${state.tags.map(t => `<option value="${t.id}">${esc(t.name)} (${t.account_count ?? 0})</option>`).join('')}
     </select>
-    <input class="search-input" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
+    <input class="search-input" id="accountSearchFilter" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
     <div style="flex:1"></div>
     <span style="font-size:12px;color:var(--text-dim)" id="accountCount">${state.accounts.length} 个账号</span>
   </div>
@@ -371,6 +411,8 @@ async function renderAccounts(el, actions) {
     <button class="btn btn-sm" onclick="batchAction('move')">移动分组</button>
     <button class="btn btn-sm" onclick="batchAction('enable')">批量启用</button>
     <button class="btn btn-sm" onclick="batchAction('disable')">批量停用</button>
+    <button class="btn btn-sm btn-primary" onclick="batchTestAccounts()">批量测试连接</button>
+    <button class="btn btn-sm" onclick="batchRefreshTokens()">批量刷新 Token</button>
     <button class="btn btn-sm" onclick="exportSelected()">导出选中</button>
     <button class="btn btn-sm btn-danger" onclick="batchAction('delete')">批量删除</button>
     <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
@@ -384,10 +426,19 @@ async function renderAccounts(el, actions) {
   el.innerHTML = toolbar + `<div class="table-wrap"><table>
     <thead><tr>
       <th style="width:32px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)"></th>
-      <th>邮箱</th><th>分组</th><th>状态</th><th>备注</th><th>操作</th>
+      <th style="width:56px">序号</th><th>邮箱</th><th>分组</th><th>状态</th><th>备注</th><th>操作</th>
     </tr></thead>
     <tbody id="accountsBody">${renderAccountRows(state.accounts)}</tbody>
   </table></div>`;
+
+  const restore = state.pendingAccountFilterRestore;
+  if (restore) {
+    state.pendingAccountFilterRestore = null;
+    applyAccountFilterContext(restore.filters);
+    await onAccountFilterChange();
+    requestAnimationFrame(() => window.scrollTo(0, restore.scrollY));
+    return;
+  }
 
   // Apply a status filter requested from the dashboard cards (活跃 / 异常)
   if (state.pendingAccountStatus) {
@@ -399,13 +450,26 @@ async function renderAccounts(el, actions) {
 
 var selectedAccountIds = new Set();
 
+function inboxCountHtml(account) {
+  const inbox = account.inbox || {};
+  const known = typeof inbox.total === 'number';
+  const value = known ? inbox.total : '—';
+  const title = known
+    ? `收件箱项目总数${inbox.checked_at ? '，最近测试：' + formatDate(inbox.checked_at) : ''}`
+    : '尚未成功获取收件箱总数；请选择账号后执行批量测试';
+  const classes = `inbox-count${known ? '' : ' inbox-count-unavailable'}${account.status === 'error' && known ? ' inbox-count-stale' : ''}`;
+  return `<span class="${classes}" title="${esc(title)}">收件箱 ${value}</span>`;
+}
+
 function renderAccountRows(accounts) {
-  return accounts.map(a => `<tr>
+  return accounts.map((a, index) => `<tr>
     <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck()" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
+    <td style="color:var(--text-dim)">${index + 1}</td>
     <td>
-      <div style="display:flex;align-items:center;gap:6px">
+      <div class="account-email-line">
         <a class="email-link" onclick="goToEmail(${a.id})" title="查看该账号邮件">${esc(a.email)}</a>
-        <button class="btn btn-sm" style="padding:2px 6px;font-size:10px;opacity:0.6" onclick="copyText('${esc(a.email)}',this)" title="复制邮箱">复制</button>
+        ${inboxCountHtml(a)}
+        <button class="btn btn-sm account-copy-btn" data-icon-only="true" onclick="copyText('${esc(a.email)}',this)" title="复制邮箱" aria-label="复制邮箱"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
       </div>
       ${tagBadgesHtml(a.tags)}
     </td>
@@ -426,16 +490,37 @@ function renderAccountRows(accounts) {
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     const orig = btn.textContent;
-    btn.textContent = '已复制';
+    const origTitle = btn.title;
+    const origOpacity = btn.style.opacity;
+    const iconOnly = btn.dataset.iconOnly === 'true';
+    if (!iconOnly) btn.textContent = '已复制';
+    btn.title = '已复制';
     btn.style.opacity = '1';
-    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '0.6'; }, 1200);
+    setTimeout(() => { if (!iconOnly) btn.textContent = orig; btn.title = origTitle; btn.style.opacity = origOpacity; }, 1200);
   }).catch(() => toast('复制失败', 'error'));
 }
 
 // Jump to email view for a specific account
 function goToEmail(accountId) {
+  const filters = getAccountFilterContext();
+  state.emailReturnContext = {
+    filters,
+    scrollY: window.scrollY,
+    label: filters.inbox === 'has_mail' ? '← 返回有邮件账号' : '← 返回邮箱账号',
+  };
+  clearTimeout(searchTimer);
+  accountFilterRequest++;
   state.pendingEmailAccount = accountId;
   navigate('emails');
+}
+
+function returnToFilteredAccounts() {
+  if (!state.emailReturnContext) return;
+  clearTimeout(searchTimer);
+  accountFilterRequest++;
+  state.pendingAccountFilterRestore = state.emailReturnContext;
+  state.emailReturnContext = null;
+  navigate('accounts');
 }
 
 // Export accounts. Pass an array of ids to export specific rows (single or selected);
@@ -542,43 +627,180 @@ async function batchAction(action) {
   else toast(res?.error?.message || '操作失败', 'error');
 }
 
-// Filter by status
-function filterAccountsByStatus(status) {
-  const filtered = status ? state.accounts.filter(a => a.status === status) : state.accounts;
-  const tbody = document.getElementById('accountsBody');
-  if (tbody) {
-    tbody.innerHTML = renderAccountRows(filtered);
-    document.getElementById('accountCount').textContent = filtered.length + ' 个账号';
+async function batchRefreshTokens() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast('请先选择账号', 'error'); return; }
+  if (!confirm(`确认刷新 ${ids.length} 个账号的 Token？将顺序处理，关闭或刷新页面会中断未开始的批次。`)) return;
+
+  const buttons = [...document.querySelectorAll('#batchBar button')];
+  const progress = document.getElementById('batchCount');
+  const results = [];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    for (let offset = 0; offset < ids.length; offset += 10) {
+      const batch = ids.slice(offset, offset + 10);
+      if (progress) progress.textContent = `刷新中 ${Math.min(offset + batch.length, ids.length)}/${ids.length}…`;
+      const res = await api('/accounts/batch', { method: 'POST', body: JSON.stringify({ action: 'refresh_tokens', ids: batch }) });
+      if (res?.success) results.push(...(res.data?.results || []));
+      else results.push(...batch.map(id => ({ id, email: '', refreshed: false, error: res?.error })));
+    }
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
   }
+
+  const refreshed = results.filter(result => result.refreshed).length;
+  const failed = results.filter(result => !result.refreshed);
+  selectedAccountIds.clear();
+  navigate('accounts');
+  showModal('Token 刷新结果', `<div class="batch-test-results">
+    <div class="batch-test-summary">成功 ${refreshed}，失败 ${failed.length}</div>
+    ${failed.length ? `<div class="batch-test-heading">失败账号</div><div class="batch-test-list">${failed.map(result => `<div class="batch-test-result-row"><b>${esc(result.email || '#' + result.id)}</b><span class="batch-test-result-error">${esc(result.error?.message || '刷新失败')}</span></div>`).join('')}</div>` : '<div class="batch-test-empty">全部账号刷新成功</div>'}
+  </div>`, () => true);
 }
 
-async function filterAccountsByGroup(gid) {
-  await loadAccounts(gid || undefined);
-  document.getElementById('accountsBody').innerHTML = renderAccountRows(state.accounts);
+function showBatchTokenModal() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast('请先选择账号', 'error'); return; }
+  showModal('批量更新 Refresh Token', `
+    <div class="form-group"><label class="form-label">Token 数据（${ids.length} 个选中账号，每行：邮箱----refresh_token）</label>
+      <textarea class="form-textarea" id="batchTokenData" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="example@outlook.com----refresh_token"></textarea>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px">必须与当前选中账号一一对应。更新后会清除收件箱总数缓存，请再执行“批量测试连接”验证。</div>
+    </div>
+  `, async () => {
+    const tokenData = document.getElementById('batchTokenData').value;
+    const res = await api('/accounts/batch', { method: 'POST', body: JSON.stringify({ action: 'update_tokens', ids, token_data: tokenData }) });
+    if (res?.success) {
+      toast(res.message || `已更新 ${res.data?.updated || 0} 个 Token`);
+      clearSelection();
+      navigate('accounts');
+      return true;
+    }
+    toast(res?.error?.message || 'Token 更新失败', 'error');
+    return false;
+  });
 }
 
-async function filterAccountsByTag(tagId) {
-  const res = await api(`/accounts${tagId ? '?tag_id=' + tagId : ''}`);
+async function batchTestAccounts() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast('请先选择账号', 'error'); return; }
+
+  const buttons = [...document.querySelectorAll('#batchBar button')];
+  const progress = document.getElementById('batchCount');
+  const results = [];
+  const requestErrors = [];
+  buttons.forEach(button => { button.disabled = true; });
+
+  try {
+    for (let offset = 0; offset < ids.length; offset += 10) {
+      const batch = ids.slice(offset, offset + 10);
+      if (progress) progress.textContent = `测试中 ${Math.min(offset + batch.length, ids.length)}/${ids.length}…`;
+      const res = await api('/accounts/batch', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'test', ids: batch }),
+      });
+      if (res?.success) {
+        results.push(...(res.data?.results || []));
+      } else {
+        requestErrors.push(`第 ${offset + 1}-${offset + batch.length} 个账号：${res?.error?.message || '请求失败'}`);
+      }
+    }
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+
+  selectedAccountIds.clear();
+  navigate('accounts');
+  showBatchTestResults(results, requestErrors);
+}
+
+function showBatchTestResults(results, requestErrors = []) {
+  const succeeded = results.filter(result => result.exists && result.connected).length;
+  const failed = results.filter(result => result.exists && !result.connected);
+  const countWarnings = results.filter(result => result.exists && result.connected && result.count_error).length;
+  const missing = results.filter(result => !result.exists).length;
+  const failedIds = failed.map(result => result.id);
+
+  const summary = `成功 ${succeeded}，失败 ${failed.length}${countWarnings ? `，总数未获取 ${countWarnings}` : ''}${missing ? `，不存在 ${missing}` : ''}`;
+  const failureRows = failed.length
+    ? failed.map(result => `<div class="batch-test-result-row">
+        <div><b>${esc(result.email)}</b><div class="batch-test-result-error">${esc(result.error?.message || '连接失败')}（${esc(result.stage || 'unknown')}）</div></div>
+        <button class="btn btn-sm" type="button" onclick="reAuthorizeFailedAccount(${result.id})">重新授权</button>
+      </div>`).join('')
+    : '<div class="batch-test-empty">没有需要重新授权的账号</div>';
+
+  showModal('批量测试结果', `<div class="batch-test-results">
+    <div class="batch-test-summary">${summary}</div>
+    ${requestErrors.length ? `<div class="batch-test-request-errors">${requestErrors.map(error => `<div>${esc(error)}</div>`).join('')}</div>` : ''}
+    <div class="batch-test-heading">连接失败账号</div>
+    <div class="batch-test-list">${failureRows}</div>
+    ${failedIds.length ? `<button class="btn btn-danger" type="button" onclick="deleteFailedAccounts([${failedIds.join(',')}])">删除失败账号 (${failedIds.length})</button>` : ''}
+  </div>`, () => true);
+}
+
+function reAuthorizeFailedAccount(id) {
+  document.querySelector('.batch-test-results')?.closest('.modal-overlay')?.remove();
+  showEditAccountModal(id);
+}
+
+async function deleteFailedAccounts(ids) {
+  if (!ids.length || !confirm(`确认删除 ${ids.length} 个测试失败的账号？此操作不可撤销。`)) return;
+  const res = await api('/accounts/batch', { method: 'POST', body: JSON.stringify({ action: 'delete', ids }) });
   if (res?.success) {
-    state.accounts = res.data || [];
-    const tbody = document.getElementById('accountsBody');
-    if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
-    const cnt = document.getElementById('accountCount');
-    if (cnt) cnt.textContent = state.accounts.length + ' 个账号';
+    document.querySelector('.batch-test-results')?.closest('.modal-overlay')?.remove();
+    toast(res.message || '账号已删除');
+    navigate('accounts');
+  } else {
+    toast(res?.error?.message || '删除失败', 'error');
   }
 }
 
 let searchTimer;
-function searchAccounts(keyword) {
+let accountFilterRequest = 0;
+
+function filteredAccountRows() {
+  const status = document.getElementById('accountStatusFilter')?.value || '';
+  const inbox = document.getElementById('accountInboxFilter')?.value || '';
+  return state.accounts.filter(account => {
+    if (status && account.status !== status) return false;
+    const total = account.inbox?.total;
+    if (inbox === 'has_mail') return Number.isInteger(total) && total > 0;
+    if (inbox === 'empty') return total === 0;
+    if (inbox === 'unknown') return !Number.isInteger(total) || total < 0;
+    return true;
+  });
+}
+
+function renderFilteredAccounts() {
+  const tbody = document.getElementById('accountsBody');
+  const filtered = filteredAccountRows();
+  if (tbody) {
+    tbody.innerHTML = filtered.length
+      ? renderAccountRows(filtered)
+      : '<tr><td colspan="8" class="empty-state">没有符合条件的账号</td></tr>';
+  }
+  const count = document.getElementById('accountCount');
+  if (count) count.textContent = filtered.length + ' 个账号';
+}
+
+async function onAccountFilterChange() {
+  clearSelection();
+  const params = accountFilterParams(getAccountFilterContext());
+  const request = ++accountFilterRequest;
+  const res = await api('/accounts' + (params.size ? '?' + params.toString() : ''));
+  if (currentPage !== 'accounts' || request !== accountFilterRequest || !res?.success) return;
+  state.accounts = res.data || [];
+  renderFilteredAccounts();
+}
+
+function filterAccountsByStatus(status) {
+  const control = document.getElementById('accountStatusFilter');
+  if (control) control.value = status;
+  onAccountFilterChange();
+}
+
+function searchAccounts() {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(async () => {
-    const res = await api(`/accounts${keyword ? '?keyword=' + encodeURIComponent(keyword) : ''}`);
-    if (res?.success) {
-      state.accounts = res.data || [];
-      const tbody = document.getElementById('accountsBody');
-      if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
-    }
-  }, 300);
+  searchTimer = setTimeout(onAccountFilterChange, 300);
 }
 
 var THUNDERBIRD_CLIENT_ID = '9e5f94bc-e8a4-4e73-b8be-63364c29d753';
@@ -774,8 +996,8 @@ async function showEditAccountModal(id) {
     </div>
     <div class="form-group">
       <label class="form-label">Refresh Token</label>
-      <textarea class="form-textarea" id="mAccToken" rows="3" placeholder="留空保持原值">${isError ? '' : ''}</textarea>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">当前: ${esc(a.refresh_token)}（已脱敏）。留空表示不修改，填入新值会覆盖。</div>
+      <textarea class="form-textarea" id="mAccToken" rows="3">${esc(a.refresh_token || '')}</textarea>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">当前完整 Refresh Token。留空表示不修改，填入新值会覆盖。</div>
     </div>
     <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="mAccPwd" value="${esc(a.password || '')}"></div>
     <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="mAccGroup">${state.groups.map(g => `<option value="${g.id}" ${g.id === a.group_id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
@@ -815,7 +1037,7 @@ async function testAccount(id, btn) {
   if (res?.success && res.data?.connected) {
     toast('Graph API 连接正常');
   } else {
-    toast(res?.data?.error || res?.error?.message || '连接失败', 'error');
+    toast(res?.data?.error?.message || res?.error?.message || '连接失败', 'error');
   }
   navigate('accounts');
 }
@@ -838,6 +1060,11 @@ async function deleteAccount(id) {
 async function renderEmails(el, actions) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadAccounts();
+  if (currentPage !== 'emails') return;
+
+  if (state.emailReturnContext) {
+    actions.innerHTML = `<button class="btn btn-sm" onclick="returnToFilteredAccounts()">${esc(state.emailReturnContext.label)}</button>`;
+  }
 
   if (state.accounts.length === 0) {
     el.innerHTML = '<div class="empty-state">暂无邮箱账号，请先添加账号</div>';

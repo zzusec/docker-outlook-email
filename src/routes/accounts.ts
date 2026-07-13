@@ -3,9 +3,152 @@ import type { Env, AccountRow } from '../types';
 import { query, first, run, batchRun, chunk, D1_MAX_BOUND_PARAMS } from '../db';
 import { ok, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
-import { getAccessToken } from '../graph';
+import { fetchEmails, getAccessToken, getInboxTotal, type GraphError } from '../graph';
 
 const accounts = new Hono<{ Bindings: Env }>();
+
+const MAX_CONNECTION_TESTS_PER_REQUEST = 10;
+const CONNECTION_TEST_CONCURRENCY = 4;
+
+type ProbeStage = 'token' | 'mail' | 'not_found';
+
+interface AccountProbeResult {
+  id: number;
+  email: string;
+  exists: boolean;
+  connected: boolean;
+  status?: 'active' | 'error';
+  stage?: ProbeStage;
+  error?: GraphError;
+  count_error?: GraphError;
+  inbox: { total: number | null; checked_at: string | null };
+  newRefreshToken?: string;
+  shouldUpdateInbox?: boolean;
+}
+
+function publicProbeResult(result: AccountProbeResult) {
+  return {
+    id: result.id,
+    email: result.email,
+    exists: result.exists,
+    connected: result.connected,
+    ...(result.status ? { status: result.status } : {}),
+    ...(result.stage ? { stage: result.stage } : {}),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.count_error ? { count_error: result.count_error } : {}),
+    inbox: result.inbox,
+  };
+}
+
+async function probeAccount(acc: AccountRow): Promise<AccountProbeResult> {
+  const inbox = {
+    total: acc.inbox_total ?? null,
+    checked_at: acc.inbox_count_updated_at ?? null,
+  };
+  const tokenResult = await getAccessToken(acc.client_id, acc.refresh_token);
+
+  if (!tokenResult.token) {
+    return {
+      id: acc.id,
+      email: acc.email,
+      exists: true,
+      connected: false,
+      status: 'error',
+      stage: 'token',
+      error: tokenResult.error ?? { code: 'TOKEN_FAILED', message: 'Token acquisition failed' },
+      inbox,
+    };
+  }
+
+  // A refresh grant can succeed even when the app has no usable Graph Mail access.
+  const mailResult = await fetchEmails(tokenResult.token, { folder: 'inbox', top: 1, skip: 0 });
+  if (mailResult.error) {
+    return {
+      id: acc.id,
+      email: acc.email,
+      exists: true,
+      connected: false,
+      status: 'error',
+      stage: 'mail',
+      error: mailResult.error,
+      inbox,
+      newRefreshToken: tokenResult.newRefreshToken,
+    };
+  }
+
+  const countResult = await getInboxTotal(tokenResult.token);
+  if (countResult.error || countResult.total === undefined) {
+    return {
+      id: acc.id,
+      email: acc.email,
+      exists: true,
+      connected: true,
+      status: 'active',
+      count_error: countResult.error ?? { code: 'GRAPH_ERROR', message: 'Inbox count unavailable' },
+      inbox,
+      newRefreshToken: tokenResult.newRefreshToken,
+    };
+  }
+
+  return {
+    id: acc.id,
+    email: acc.email,
+    exists: true,
+    connected: true,
+    status: 'active',
+    inbox: { total: countResult.total, checked_at: new Date().toISOString() },
+    newRefreshToken: tokenResult.newRefreshToken,
+    shouldUpdateInbox: true,
+  };
+}
+
+function probeUpdateStatement(acc: AccountRow, result: AccountProbeResult) {
+  const assignments: string[] = [];
+  const params: unknown[] = [];
+
+  if (result.newRefreshToken && result.newRefreshToken !== acc.refresh_token) {
+    assignments.push('refresh_token = ?');
+    params.push(result.newRefreshToken);
+  }
+  assignments.push('status = ?', 'updated_at = CURRENT_TIMESTAMP');
+  params.push(result.status);
+  if (result.shouldUpdateInbox) {
+    assignments.push('inbox_total = ?', 'inbox_count_updated_at = ?');
+    params.push(result.inbox.total, result.inbox.checked_at);
+  }
+  params.push(acc.id);
+
+  return {
+    sql: `UPDATE accounts SET ${assignments.join(', ')} WHERE id = ?`,
+    params,
+  };
+}
+
+async function persistProbeResults(
+  db: D1Database,
+  probes: Array<{ account: AccountRow; result: AccountProbeResult }>
+) {
+  await batchRun(db, probes.map(({ account, result }) => probeUpdateStatement(account, result)));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  async function runWorker() {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await worker(items[index]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runWorker));
+  return results;
+}
 
 // Mask account for list responses
 function safeAccount(acc: AccountRow) {
@@ -17,6 +160,10 @@ function safeAccount(acc: AccountRow) {
     group_id: acc.group_id,
     remark: acc.remark,
     status: acc.status,
+    inbox: {
+      total: acc.inbox_total ?? null,
+      checked_at: acc.inbox_count_updated_at ?? null,
+    },
     created_at: acc.created_at,
     updated_at: acc.updated_at,
   };
@@ -202,6 +349,7 @@ accounts.post('/batch', async (c) => {
     action?: string;
     ids?: number[];
     group_id?: number;
+    token_data?: string;
   };
 
   if (!body.ids?.length) return badRequest('请选择账号');
@@ -209,6 +357,138 @@ accounts.post('/batch', async (c) => {
   // Each action runs as one atomic D1 batch; ids are chunked so every
   // statement stays within D1's 100-bound-params limit.
   const inList = (part: number[]) => part.map(() => '?').join(',');
+  const validIds = () => [...new Set((body.ids ?? []).filter((id) => Number.isInteger(id) && id > 0))];
+
+  if (body.action === 'refresh_tokens') {
+    const ids = validIds();
+    if (!ids.length) return badRequest('请选择有效账号');
+    if (ids.length > MAX_CONNECTION_TESTS_PER_REQUEST) {
+      return badRequest(`单次最多刷新 ${MAX_CONNECTION_TESTS_PER_REQUEST} 个账号，请分批操作`);
+    }
+    const found = await query<AccountRow>(
+      c.env.DB,
+      `SELECT * FROM accounts WHERE id IN (${inList(ids)})`,
+      ids
+    );
+    const byId = new Map(found.map((account) => [account.id, account]));
+    const results: Array<{ id: number; email: string; refreshed: boolean; rotated?: boolean; error?: GraphError }> = [];
+
+    for (const id of ids) {
+      const account = byId.get(id);
+      if (!account) {
+        results.push({ id, email: '', refreshed: false, error: { code: 'NOT_FOUND', message: '账号不存在' } });
+        continue;
+      }
+      const tokenResult = await getAccessToken(account.client_id, account.refresh_token);
+      if (!tokenResult.token) {
+        await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', id]);
+        results.push({ id, email: account.email, refreshed: false, error: tokenResult.error });
+        continue;
+      }
+      const rotated = Boolean(tokenResult.newRefreshToken && tokenResult.newRefreshToken !== account.refresh_token);
+      if (rotated) {
+        await run(c.env.DB, 'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [tokenResult.newRefreshToken, 'active', id]);
+      } else {
+        await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['active', id]);
+      }
+      results.push({ id, email: account.email, refreshed: true, rotated });
+    }
+
+    const refreshed = results.filter((result) => result.refreshed).length;
+    const failed = results.length - refreshed;
+    return ok({ requested: ids.length, refreshed, failed, results }, `Token 刷新完成：成功 ${refreshed}，失败 ${failed}`);
+  }
+
+  if (body.action === 'update_tokens') {
+    const ids = validIds();
+    if (!ids.length) return badRequest('请选择有效账号');
+    if (typeof body.token_data !== 'string' || !body.token_data.trim()) {
+      return badRequest('请粘贴 Token 数据');
+    }
+    if (body.token_data.length > 200000) return badRequest('Token 数据过长');
+
+    const tokenMap = new Map<string, string>();
+    const lines = body.token_data.replace(/^﻿/, '').split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length !== ids.length) return badRequest('每个选中账号必须恰好提供一行 邮箱----refresh_token');
+    for (const line of lines) {
+      const delimiter = line.indexOf('----');
+      if (delimiter <= 0) return badRequest('Token 格式错误：每行应为 邮箱----refresh_token');
+      const email = line.slice(0, delimiter).trim();
+      const token = line.slice(delimiter + 4).trim();
+      const key = email.toLowerCase();
+      if (!isValidEmail(email) || !token || token.length > 8192 || /[ -]/.test(token)) {
+        return badRequest('Token 数据包含无效邮箱或 Token');
+      }
+      if (tokenMap.has(key)) return badRequest('Token 数据包含重复邮箱');
+      tokenMap.set(key, token);
+    }
+
+    const selectedResults = await batchRun<AccountRow>(
+      c.env.DB,
+      chunk(ids, D1_MAX_BOUND_PARAMS).map((part) => ({
+        sql: `SELECT * FROM accounts WHERE id IN (${inList(part)})`,
+        params: part,
+      }))
+    );
+    const selectedAccounts = selectedResults.flatMap((result) => result.results);
+    if (selectedAccounts.length !== ids.length) return badRequest('选中账号已不存在，请刷新页面后重试');
+    if (selectedAccounts.some((account) => !tokenMap.has(account.email.toLowerCase()))) {
+      return badRequest('Token 数据与选中账号不完全匹配');
+    }
+
+    await batchRun(
+      c.env.DB,
+      selectedAccounts.map((account) => ({
+        sql: `UPDATE accounts SET refresh_token = ?, inbox_total = NULL, inbox_count_updated_at = NULL,
+              updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        params: [tokenMap.get(account.email.toLowerCase())!, account.id],
+      }))
+    );
+    return ok({ updated: selectedAccounts.length, inbox_counts_invalidated: selectedAccounts.length }, `已更新 ${selectedAccounts.length} 个账号的 Token，请执行批量测试连接`);
+  }
+
+  if (body.action === 'test') {
+    const ids = [...new Set(body.ids.filter((id) => Number.isInteger(id) && id > 0))];
+    if (!ids.length) return badRequest('请选择有效账号');
+    if (ids.length > MAX_CONNECTION_TESTS_PER_REQUEST) {
+      return badRequest(`单次最多测试 ${MAX_CONNECTION_TESTS_PER_REQUEST} 个账号，请分批操作`);
+    }
+
+    const foundAccounts = await query<AccountRow>(
+      c.env.DB,
+      `SELECT * FROM accounts WHERE id IN (${inList(ids)})`,
+      ids
+    );
+    const probes = await mapWithConcurrency(
+      foundAccounts,
+      CONNECTION_TEST_CONCURRENCY,
+      async (account) => ({ account, result: await probeAccount(account) })
+    );
+    await persistProbeResults(c.env.DB, probes);
+
+    const byId = new Map(probes.map((probe) => [probe.account.id, probe.result]));
+    const results = ids.map((id) => byId.get(id) ?? {
+      id,
+      email: '',
+      exists: false,
+      connected: false,
+      stage: 'not_found' as const,
+      error: { code: 'NOT_FOUND', message: '账号不存在' },
+      inbox: { total: null, checked_at: null },
+    });
+    const connected = results.filter((result) => result.exists && result.connected).length;
+    const failed = results.filter((result) => result.exists && !result.connected).length;
+    const missing = results.length - connected - failed;
+
+    return ok({
+      requested: ids.length,
+      tested: probes.length,
+      connected,
+      failed,
+      missing,
+      results: results.map(publicProbeResult),
+    }, `测试完成：成功 ${connected}，失败 ${failed}${missing ? `，不存在 ${missing}` : ''}`);
+  }
 
   if (body.action === 'delete') {
     await batchRun(
@@ -276,10 +556,9 @@ accounts.get('/:id', async (c) => {
     [id]
   );
 
-  // For detail view, show full client_id but still mask refresh_token
+  // Detail view intentionally exposes current credentials to the authenticated administrator.
   return ok({
     ...acc,
-    refresh_token: maskToken(acc.refresh_token),
     group_name: acc.group_name ?? '默认分组',
     group_color: acc.group_color ?? '#2563eb',
     tags: tagRows,
@@ -367,38 +646,18 @@ accounts.delete('/:id', async (c) => {
   return ok(null, '账号已删除');
 });
 
-// POST /api/accounts/:id/test - test Graph connection
+// POST /api/accounts/:id/test - test token refresh and actual Inbox access
 accounts.post('/:id/test', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   const acc = await first<AccountRow>(c.env.DB, 'SELECT * FROM accounts WHERE id = ?', [id]);
   if (!acc) return notFound('账号不存在');
 
-  const result = await getAccessToken(acc.client_id, acc.refresh_token);
-
-  if (result.token) {
-    // Auto-save rotated refresh_token + mark active
-    const updates: unknown[] = ['active', id];
-    let sql = 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP';
-    if (result.newRefreshToken && result.newRefreshToken !== acc.refresh_token) {
-      sql = 'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP';
-      updates.splice(0, 0, result.newRefreshToken);
-    }
-    sql += ' WHERE id = ?';
-    await run(c.env.DB, sql, updates);
-    return ok({ connected: true }, 'Graph API 连接正常');
-  }
-
-  // Mark as error
-  await run(
-    c.env.DB,
-    'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['error', id]
+  const result = await probeAccount(acc);
+  await persistProbeResults(c.env.DB, [{ account: acc, result }]);
+  return ok(
+    publicProbeResult(result),
+    result.connected ? 'Graph API 连接正常' : 'Graph API 连接失败'
   );
-
-  return ok({
-    connected: false,
-    error: result.error?.message ?? 'Unknown error',
-  }, 'Graph API 连接失败');
 });
 
 export default accounts;

@@ -18,13 +18,17 @@ async function getTokenAndRefresh(
     return { error: result.error?.message ?? 'Token acquisition failed' };
   }
 
-  // Auto-save new refresh_token if Microsoft rotated it
+  // Always persist a rotated refresh_token. Microsoft invalidates the previous
+  // one after a successful refresh; dropping the new value breaks the account.
+  // Also clear any prior 'error' status when the token works again.
   if (result.newRefreshToken && result.newRefreshToken !== acc.refresh_token) {
     await run(
       db,
       'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [result.newRefreshToken, 'active', acc.id]
     );
+  } else if (acc.status !== 'active') {
+    await run(db, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['active', acc.id]);
   }
 
   return { token: result.token };
