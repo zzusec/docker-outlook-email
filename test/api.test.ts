@@ -232,4 +232,139 @@ describe('account connection tests', () => {
     expect(body.error.message).toContain('格式错误');
     expect(db.batch).not.toHaveBeenCalled();
   });
+
+  it('rejects a refresh_tokens batch larger than ten accounts', async () => {
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh_tokens', ids: Array.from({ length: 11 }, (_, i) => i + 1) }),
+      }),
+      { DB: {} } as any
+    );
+    const body = await res.json() as { success: boolean; error: { message: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.message).toContain('最多刷新 10 个账号');
+  });
+
+  it('refreshes selected tokens, persists rotation, continues after failures, and never returns tokens', async () => {
+    const rows = [
+      {
+        id: 1,
+        email: 'rotate@outlook.com',
+        client_id: 'client-1',
+        refresh_token: 'secret-old-1',
+        password: 'pwd-1',
+        group_id: 1,
+        remark: '',
+        status: 'active',
+        inbox_total: 3,
+        inbox_count_updated_at: '2026-01-01',
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+      },
+      {
+        id: 2,
+        email: 'same@outlook.com',
+        client_id: 'client-2',
+        refresh_token: 'secret-old-2',
+        password: '',
+        group_id: 1,
+        remark: '',
+        status: 'error',
+        inbox_total: null,
+        inbox_count_updated_at: null,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+      },
+      {
+        id: 3,
+        email: 'fail@outlook.com',
+        client_id: 'client-3',
+        refresh_token: 'secret-old-3',
+        password: '',
+        group_id: 1,
+        remark: '',
+        status: 'active',
+        inbox_total: null,
+        inbox_count_updated_at: null,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+      },
+    ];
+    const statement = {
+      bind: vi.fn().mockReturnThis(),
+      first: vi.fn().mockResolvedValue(null),
+      all: vi.fn().mockResolvedValue({ results: rows }),
+      run: vi.fn().mockResolvedValue({}),
+    };
+    const db = {
+      prepare: vi.fn(() => statement),
+      batch: vi.fn().mockResolvedValue([]),
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: 'access-secret-1',
+        refresh_token: 'secret-new-1',
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: 'access-secret-2',
+        // no refresh_token → success without rotation
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: 'invalid_grant',
+        error_description: 'The refresh token has expired',
+      }), { status: 400 })));
+
+    const accounts = (await import('../src/routes/accounts')).default;
+    const res = await accounts.fetch(
+      new Request('https://example.test/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh_tokens', ids: [1, 2, 3, 99] }),
+      }),
+      { DB: db } as any
+    );
+    const body = await res.json() as {
+      success: boolean;
+      data: {
+        requested: number;
+        refreshed: number;
+        failed: number;
+        results: Array<{ id: number; email: string; refreshed: boolean; rotated?: boolean; error?: { code: string; message: string } }>;
+      };
+    };
+
+    expect(body.success).toBe(true);
+    expect(body.data.requested).toBe(4);
+    expect(body.data.refreshed).toBe(2);
+    expect(body.data.failed).toBe(2);
+
+    const byId = new Map(body.data.results.map((result) => [result.id, result]));
+    expect(byId.get(1)).toMatchObject({ email: 'rotate@outlook.com', refreshed: true, rotated: true });
+    expect(byId.get(2)).toMatchObject({ email: 'same@outlook.com', refreshed: true, rotated: false });
+    expect(byId.get(3)?.refreshed).toBe(false);
+    expect(byId.get(3)?.error?.code).toBe('invalid_grant');
+    expect(byId.get(99)).toMatchObject({ email: '', refreshed: false });
+    expect(byId.get(99)?.error?.code).toBe('NOT_FOUND');
+
+    // Response must never leak credentials or access tokens.
+    const raw = JSON.stringify(body);
+    for (const secret of [
+      'secret-old-1', 'secret-old-2', 'secret-old-3',
+      'secret-new-1', 'access-secret-1', 'access-secret-2', 'pwd-1',
+    ]) {
+      expect(raw).not.toContain(secret);
+    }
+
+    // Rotated token persisted; non-rotated success only flips status; failure marks error.
+    expect(statement.bind).toHaveBeenCalledWith('secret-new-1', 'active', 1);
+    expect(statement.bind).toHaveBeenCalledWith('active', 2);
+    expect(statement.bind).toHaveBeenCalledWith('error', 3);
+    // One SELECT + three UPDATEs (missing id skips write)
+    expect(statement.run).toHaveBeenCalledTimes(3);
+  });
 });

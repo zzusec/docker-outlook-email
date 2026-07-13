@@ -413,6 +413,7 @@ async function renderAccounts(el, actions) {
     <button class="btn btn-sm" onclick="batchAction('disable')">批量停用</button>
     <button class="btn btn-sm btn-primary" onclick="batchTestAccounts()">批量测试连接</button>
     <button class="btn btn-sm" onclick="batchRefreshTokens()">批量刷新 Token</button>
+    <button class="btn btn-sm" onclick="showImportTokenModal()">导入覆盖 Token</button>
     <button class="btn btn-sm" onclick="exportSelected()">导出选中</button>
     <button class="btn btn-sm btn-danger" onclick="batchAction('delete')">批量删除</button>
     <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
@@ -658,13 +659,17 @@ async function batchRefreshTokens() {
   </div>`, () => true);
 }
 
-function showBatchTokenModal() {
+function showImportTokenModal() {
   const ids = [...selectedAccountIds];
   if (!ids.length) { toast('请先选择账号', 'error'); return; }
-  showModal('批量更新 Refresh Token', `
+  showModal('导入覆盖 Token', `
     <div class="form-group"><label class="form-label">Token 数据（${ids.length} 个选中账号，每行：邮箱----refresh_token）</label>
       <textarea class="form-textarea" id="batchTokenData" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="example@outlook.com----refresh_token"></textarea>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:6px">必须与当前选中账号一一对应。更新后会清除收件箱总数缓存，请再执行“批量测试连接”验证。</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px;line-height:1.6">
+        这是<strong>粘贴覆盖</strong>，不是自动向 Microsoft 刷新。须与当前选中账号一一对应。
+        覆盖后会清除收件箱总数缓存，请再执行“批量测试连接”验证。
+        日常保活请用“批量刷新 Token”。
+      </div>
     </div>
   `, async () => {
     const tokenData = document.getElementById('batchTokenData').value;
