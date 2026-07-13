@@ -5,6 +5,7 @@
 ## 目录
 
 - [前置准备](#前置准备)
+- [推荐：一键安装脚本](#推荐一键安装脚本)
 - [第一步：安装工具](#第一步安装工具)
 - [第二步：获取代码](#第二步获取代码)
 - [第三步：登录 Cloudflare](#第三步登录-cloudflare)
@@ -37,6 +38,49 @@
 
 ---
 
+## 推荐：一键安装脚本
+
+不想逐步敲命令时，用仓库根目录的 `install.sh`（自动装依赖、登录检查、建/复用 D1、写 `wrangler.toml`、设 Secret、迁移、部署）：
+
+```bash
+git clone https://github.com/zzusec/cf-outlook-email.git
+cd cf-outlook-email
+chmod +x install.sh
+./install.sh
+```
+
+非交互（CI / 服务器）：
+
+```bash
+ADMIN_PASSWORD='你的登录密码' ./install.sh -y
+```
+
+常用参数：
+
+| 参数 / 环境变量 | 说明 |
+|----------------|------|
+| `--password` / `ADMIN_PASSWORD` | 后台登录密码（必填） |
+| `--cookie-secret` / `COOKIE_SECRET` | Cookie 密钥，不填则自动生成 |
+| `--gptmail-key` / `GPTMAIL_API_KEY` | 可选，临时邮箱 |
+| `--skip-deps` | 跳过 pnpm/npm install |
+| `--skip-login` | 跳过登录（已 `wrangler login` 时） |
+| `--no-deploy` | 只做到迁移，不 deploy |
+| `-y` | 尽量非交互（仍需密码） |
+
+脚本会：
+
+1. 检查 Node 18+
+2. `pnpm install`（无 pnpm 则用 npm）
+3. 未登录则引导 `wrangler login`
+4. 创建或复用 D1，并自动写入 `wrangler.toml` 的 `database_id`（这是人手最容易填错的一步）
+5. 设置 `ADMIN_PASSWORD` / `COOKIE_SECRET`
+6. `d1 migrations apply --remote`
+7. `wrangler deploy`，并打印访问 URL
+
+> 下面「第一步～第七步」是同一流程的手动版，出问题时可对照排查。
+
+---
+
 ## 第一步：安装工具
 
 确认 Node.js 和 pnpm 已安装：
@@ -53,7 +97,7 @@ pnpm --version    # 应该显示版本号
 ## 第二步：获取代码
 
 ```bash
-git clone https://github.com/roseforyou/cf-outlook-email.git
+git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
 pnpm install
 ```

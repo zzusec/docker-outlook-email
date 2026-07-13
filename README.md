@@ -41,9 +41,24 @@
 
 > 💡 完整步骤请看 [详细部署教程](./docs/GUIDE.md)
 
+### 方式一：一键脚本（推荐）
+
+自动完成：装依赖 → 登录检查 → 创建/复用 D1 → 写 `wrangler.toml` → 设 Secret → 迁移 → 部署，避免漏步骤和手填 `database_id` 出错。
+
+```bash
+git clone https://github.com/zzusec/cf-outlook-email.git
+cd cf-outlook-email
+chmod +x install.sh
+./install.sh
+# 或非交互：
+# ADMIN_PASSWORD='你的登录密码' ./install.sh -y
+```
+
+### 方式二：手动命令
+
 ```bash
 # 1. 克隆 & 安装
-git clone https://github.com/roseforyou/cf-outlook-email.git
+git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
 pnpm install
 

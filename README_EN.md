@@ -41,9 +41,24 @@
 
 > 💡 See the [Deployment Guide](./docs/GUIDE.md) for full steps.
 
+### Option A: One-shot script (recommended)
+
+Automates: install deps → login check → create/reuse D1 → write `wrangler.toml` → secrets → migrate → deploy.
+
+```bash
+git clone https://github.com/zzusec/cf-outlook-email.git
+cd cf-outlook-email
+chmod +x install.sh
+./install.sh
+# non-interactive:
+# ADMIN_PASSWORD='your-password' ./install.sh -y
+```
+
+### Option B: Manual commands
+
 ```bash
 # 1. Clone & install
-git clone https://github.com/roseforyou/cf-outlook-email.git
+git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
 pnpm install
 
