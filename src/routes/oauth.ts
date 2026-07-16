@@ -166,7 +166,10 @@ function callbackPage(success: boolean, error: string, data?: { client_id: strin
 <script>
   var result = { success: ${success}, data: ${dataJson}, error: ${JSON.stringify(error)} };
   if (window.opener) {
-    window.opener.postMessage({ type: 'oauth-callback', ...result }, '*');
+    // Callback page is same-origin with the opener (both served by this worker),
+    // so target the opener's exact origin instead of '*' - '*' would leak the
+    // long-lived refresh_token to any window that acquired an opener reference.
+    window.opener.postMessage({ type: 'oauth-callback', ...result }, location.origin);
     setTimeout(function() { window.close(); }, 1500);
   }
 </script>

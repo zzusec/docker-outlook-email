@@ -706,6 +706,10 @@ async function exchangeManualCode(btn) {
 
 // Listen for OAuth callback message from popup
 window.addEventListener('message', function(e) {
+  // Origin check: the callback page is same-origin with us; anything else is
+  // spoofed. Reject before touching e.data so a hostile frame can't smuggle
+  // input into the client_id / refresh_token fields.
+  if (e.origin !== window.location.origin) return;
   if (e.data?.type !== 'oauth-callback') return;
   if (e.data.success && e.data.data) {
     const d = e.data.data;
