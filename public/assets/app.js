@@ -1254,14 +1254,31 @@ async function viewTempMessage(emailId, messageId) {
   }
 
   const e = res.data;
+  // Render untrusted HTML bodies inside a sandboxed, script-less iframe (same as
+  // the main mailbox detail view) so malicious markup - e.g. <img onerror> - can't
+  // execute in the app origin. Plain-text bodies stay escaped in a <pre>.
+  const isHtml = e.body_type === 'html';
+  const bodyContent = isHtml
+    ? `<iframe id="tempMailFrame" sandbox="allow-same-origin" onload="resizeFrame(this)" style="width:100%;border:none;min-height:300px;background:#fff;border-radius:var(--radius)"></iframe>`
+    : `<pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.7">${esc(String(e.body || ''))}</pre>`;
   pane.innerHTML = `
     <div>
       <button class="btn btn-sm" onclick="loadTempMessages(${emailId})" style="margin-bottom:12px">← 返回列表</button>
       <h3>${esc(String(e.subject))}</h3>
       <div style="color:var(--text-muted);font-size:13px;margin:8px 0">From: ${esc(String(e.from))} → ${esc(String(e.to))}</div>
-      <div style="margin-top:16px;font-size:14px;line-height:1.7">${e.body_type === 'html' ? e.body : '<pre style="white-space:pre-wrap">' + esc(String(e.body)) + '</pre>'}</div>
+      <div style="margin-top:16px">${bodyContent}</div>
     </div>
   `;
+
+  if (isHtml) {
+    const frame = document.getElementById('tempMailFrame');
+    if (frame) {
+      const doc = frame.contentDocument;
+      doc.open();
+      doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;color:#333;margin:12px;}</style></head><body>${e.body || ''}</body></html>`);
+      doc.close();
+    }
+  }
 }
 
 // ========== Settings ==========
