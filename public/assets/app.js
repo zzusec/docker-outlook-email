@@ -940,10 +940,15 @@ async function renderEmails(el) {
   el.innerHTML = `
     <div class="email-layout">
       <div class="email-toolbar">
-        <select class="form-select" style="width:auto;min-width:240px" id="emailAccountSelect" onchange="loadEmailList(this.value)">
-          <option value="">-- 选择账号 --</option>
-          ${activeAccounts.map(a => `<option value="${a.id}">${esc(a.email)}</option>`).join('')}
-        </select>
+        <div class="combo" id="emailAccountCombo" style="min-width:280px">
+          <input class="search-input" id="emailAccountInput" style="width:100%;padding-right:32px" placeholder="点击选择 / 输入关键字筛选账号" autocomplete="off"
+            onfocus="openAccountCombo(this)" onclick="clickAccountCombo(this)" oninput="filterAccountCombo(this.value)" onkeydown="accountComboKeydown(event)">
+          <button class="combo-arrow" type="button" title="展开账号列表" onclick="toggleAccountCombo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <div class="combo-list" id="accountComboList" style="display:none">
+            ${activeAccounts.map(a => `<div class="combo-item" data-id="${a.id}" data-email="${esc(a.email.toLowerCase())}" onclick="pickAccountComboEl(this)">${esc(a.email)}</div>`).join('')}
+            <div class="combo-empty" style="display:none">无匹配账号</div>
+          </div>
+        </div>
         <button class="btn" onclick="copySelectedEmail(this)" title="复制当前邮箱地址" style="display:inline-flex;align-items:center;gap:6px">${copyIcon}<span class="btn-label">复制</span></button>
         <span class="vr"></span>
         <select class="form-select" style="width:auto;min-width:100px" id="emailFolder" onchange="onFolderChange()">
@@ -970,14 +975,79 @@ async function renderEmails(el) {
     </div>
   `;
   if (state.pendingEmailAccount) {
-    const sel = document.getElementById('emailAccountSelect');
-    if (sel) {
-      sel.value = state.pendingEmailAccount;
-      loadEmailList(state.pendingEmailAccount);
+    const acc = state.accounts.find(a => String(a.id) === String(state.pendingEmailAccount));
+    const input = document.getElementById('emailAccountInput');
+    if (acc && input) {
+      input.value = acc.email;
+      loadEmailList(acc.id);
     }
     state.pendingEmailAccount = null;
   }
 }
+
+// ---- Searchable account combobox: a select and a type-to-filter input in one.
+// Focus/arrow shows the full list (select-like); typing narrows it (100+ accounts).
+function openAccountCombo(input) {
+  input.select();
+  filterAccountCombo('');
+}
+
+// Re-open on click when already focused (focus event won't refire)
+function clickAccountCombo(input) {
+  const list = document.getElementById('accountComboList');
+  if (list && list.style.display === 'none') filterAccountCombo(input.value);
+}
+
+function toggleAccountCombo() {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  if (list.style.display === 'none') {
+    filterAccountCombo('');
+    document.getElementById('emailAccountInput')?.focus();
+  } else {
+    list.style.display = 'none';
+  }
+}
+
+function filterAccountCombo(keyword) {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  const kw = (keyword || '').trim().toLowerCase();
+  let visible = 0;
+  list.querySelectorAll('.combo-item').forEach(it => {
+    const hit = !kw || it.dataset.email.includes(kw);
+    it.style.display = hit ? '' : 'none';
+    if (hit) visible++;
+  });
+  const empty = list.querySelector('.combo-empty');
+  if (empty) empty.style.display = visible ? 'none' : '';
+  list.style.display = '';
+}
+
+function pickAccountComboEl(el) {
+  const input = document.getElementById('emailAccountInput');
+  const list = document.getElementById('accountComboList');
+  if (input) input.value = el.textContent.trim();
+  if (list) list.style.display = 'none';
+  loadEmailList(el.dataset.id);
+}
+
+function accountComboKeydown(e) {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  if (e.key === 'Escape') { list.style.display = 'none'; return; }
+  if (e.key === 'Enter') {
+    const first = [...list.querySelectorAll('.combo-item')].find(it => it.style.display !== 'none');
+    if (first) pickAccountComboEl(first);
+  }
+}
+
+// Close the combobox when clicking anywhere outside it
+document.addEventListener('click', (e) => {
+  const combo = document.getElementById('emailAccountCombo');
+  const list = document.getElementById('accountComboList');
+  if (list && combo && !combo.contains(e.target)) list.style.display = 'none';
+});
 
 const EMAIL_PAGE_SIZE = 30;
 
