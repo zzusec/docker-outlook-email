@@ -1318,7 +1318,8 @@ async function renderSettings(el) {
   const settings = res?.data || {};
 
   el.innerHTML = `
-    <div class="card" style="max-width:600px">
+    <div class="settings-grid">
+    <div class="card">
       <h3 style="margin-bottom:20px">系统设置</h3>
       <div class="form-group">
         <label class="form-label">登录密码 (当前: ${esc(settings.login_password || '未设置')})</label>
@@ -1335,7 +1336,7 @@ async function renderSettings(el) {
       <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">对外 API</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         用 API Key 免登录拉取邮件（适合脚本自动取验证码）。详见 <a href="https://github.com/roseforyou/cf-outlook-email/blob/main/docs/API.md" target="_blank">API 文档</a>。
@@ -1357,7 +1358,7 @@ async function renderSettings(el) {
       </div>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">定时刷新 Token</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         定时自动刷新账号 Token，让长期不用的号也不过期。Cloudflare 每 6 小时唤醒一次，实际是否执行由下面的「间隔」决定。
@@ -1391,7 +1392,7 @@ async function renderSettings(el) {
       </div>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">Telegram 推送新邮件</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         新邮件到达时推送到 Telegram（适合实时收验证码）。需先 <a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">用 @BotFather 创建机器人</a> 拿到 Bot Token，再给机器人发条消息后用 <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，推送延迟取决于邮件到达时刻与下一次唤醒的间隔，平均约 2~3 分钟、最长约 5 分钟；下面的「间隔」默认 1（每次唤醒都推，即最快），设得比 5 大则进一步拉长。
@@ -1427,6 +1428,7 @@ async function renderSettings(el) {
         <button class="btn" type="button" onclick="testTelegram(this)">发送测试消息</button>
         <button class="btn" type="button" onclick="pushNow(this)">立即推送一轮</button>
       </div>
+    </div>
     </div>
   `;
 }
