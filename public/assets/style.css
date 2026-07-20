@@ -235,7 +235,6 @@ button { cursor: pointer; font-family: inherit; }
   transition: background var(--transition-slow), border-color var(--transition-slow);
 }
 .topbar-title { font-size: 16px; font-weight: 600; letter-spacing: -0.2px; }
-.topbar-actions { display: flex; gap: 8px; align-items: center; }
 .content { padding: 28px; min-height: calc(100vh - var(--topbar-h)); }
 
 /* Theme Toggle */
