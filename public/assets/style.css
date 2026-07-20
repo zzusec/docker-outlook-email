@@ -472,6 +472,13 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ===== Toolbar ===== */
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+
+/* Page-level toolbar: page context on the left, page actions on the right.
+   Global actions (theme, logout) stay in the topbar/sidebar; per-page buttons
+   live here, below the page title, following common dashboard conventions. */
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.page-toolbar .pt-info { font-size: 12.5px; color: var(--text-dim); }
+.page-toolbar .pt-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .toolbar .search-input, .email-toolbar .search-input {
   padding: 8px 14px; background: var(--bg-input);
   border: 1px solid var(--border-light); border-radius: 8px;

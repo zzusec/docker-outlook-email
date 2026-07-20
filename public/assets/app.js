@@ -142,38 +142,45 @@ function navigate(page) {
 function renderPage() {
   const content = document.getElementById('pageContent');
   const title = document.getElementById('topbarTitle');
-  const actions = document.getElementById('topbarActions');
-  actions.innerHTML = '';
 
   switch (currentPage) {
     case 'accounts':
       title.textContent = '邮箱账号';
-      renderAccounts(content, actions);
+      renderAccounts(content);
       break;
     case 'groups':
       title.textContent = '分组管理';
-      renderGroups(content, actions);
+      renderGroups(content);
       break;
     case 'tags':
       title.textContent = '标签管理';
-      renderTags(content, actions);
+      renderTags(content);
       break;
     case 'emails':
       title.textContent = '邮件查看';
-      renderEmails(content, actions);
+      renderEmails(content);
       break;
     case 'temp-emails':
       title.textContent = '临时邮箱';
-      renderTempEmails(content, actions);
+      renderTempEmails(content);
       break;
     case 'settings':
       title.textContent = '系统设置';
-      renderSettings(content, actions);
+      renderSettings(content);
       break;
     default:
       title.textContent = '仪表盘';
       renderDashboard(content);
   }
+}
+
+// Page-level toolbar row: context info on the left, action buttons on the right.
+// Rendered at the top of each page's content (replaces the old topbar button slot).
+function pageToolbarHtml(info, actionsHtml) {
+  return `<div class="page-toolbar">
+    <span class="pt-info">${info || ''}</span>
+    <div class="pt-actions">${actionsHtml || ''}</div>
+  </div>`;
 }
 
 // ========== Dashboard ==========
@@ -220,17 +227,21 @@ async function loadGroups() {
   if (res?.success) state.groups = res.data || [];
 }
 
-async function renderGroups(el, actions) {
+async function renderGroups(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="showGroupModal()">+ 新建分组</button>';
   await loadGroups();
 
+  const toolbar = pageToolbarHtml(
+    `${state.groups.length} 个分组`,
+    '<button class="btn btn-primary btn-sm" onclick="showGroupModal()">+ 新建分组</button>'
+  );
+
   if (state.groups.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无分组</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无分组</div>';
     return;
   }
 
-  el.innerHTML = `<div class="table-wrap"><table>
+  el.innerHTML = toolbar + `<div class="table-wrap"><table>
     <thead><tr><th>名称</th><th>颜色</th><th>描述</th><th>账号数</th><th>操作</th></tr></thead>
     <tbody>${state.groups.map(g => `<tr>
       <td><span class="color-dot" style="background:${esc(g.color)}"></span>${esc(g.name)}</td>
@@ -279,17 +290,21 @@ async function loadTags() {
   if (res?.success) state.tags = res.data || [];
 }
 
-async function renderTags(el, actions) {
+async function renderTags(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="showTagModal()">+ 新建标签</button>';
   await loadTags();
 
+  const toolbar = pageToolbarHtml(
+    `${state.tags.length} 个标签`,
+    '<button class="btn btn-primary btn-sm" onclick="showTagModal()">+ 新建标签</button>'
+  );
+
   if (state.tags.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无标签。标签可给一个账号打多个，用于跨分组筛选。</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无标签。标签可给一个账号打多个，用于跨分组筛选。</div>';
     return;
   }
 
-  el.innerHTML = `<div class="table-wrap"><table>
+  el.innerHTML = toolbar + `<div class="table-wrap"><table>
     <thead><tr><th>标签</th><th>颜色</th><th>账号数</th><th>操作</th></tr></thead>
     <tbody>${state.tags.map(t => `<tr>
       <td><span class="badge" style="background:${esc(t.color)}22;color:${esc(t.color)}">${esc(t.name)}</span></td>
@@ -335,19 +350,20 @@ async function loadAccounts(groupId) {
   if (res?.success) state.accounts = res.data || [];
 }
 
-async function renderAccounts(el, actions) {
+async function renderAccounts(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadGroups();
   await loadTags();
   await loadAccounts();
 
-  actions.innerHTML = `
-    <button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
-    <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
-    <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>
-  `;
+  const pageBar = pageToolbarHtml(
+    `<span id="accountCount">${state.accounts.length} 个账号</span>`,
+    `<button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
+     <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
+     <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>`
+  );
 
-  const toolbar = `<div class="toolbar">
+  const toolbar = pageBar + `<div class="toolbar">
     <select class="form-select" style="width:auto;min-width:140px" id="accountGroupFilter" onchange="filterAccountsByGroup(this.value)">
       <option value="">全部分组</option>
       ${state.groups.map(g => `<option value="${g.id}">${esc(g.name)} (${g.account_count ?? 0})</option>`).join('')}
@@ -363,8 +379,6 @@ async function renderAccounts(el, actions) {
       ${state.tags.map(t => `<option value="${t.id}">${esc(t.name)} (${t.account_count ?? 0})</option>`).join('')}
     </select>
     <input class="search-input" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
-    <div style="flex:1"></div>
-    <span style="font-size:12px;color:var(--text-dim)" id="accountCount">${state.accounts.length} 个账号</span>
   </div>
   <div id="batchBar" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;display:none;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
@@ -839,7 +853,7 @@ async function deleteAccount(id) {
 }
 
 // ========== Emails ==========
-async function renderEmails(el, actions) {
+async function renderEmails(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadAccounts();
 
@@ -1179,17 +1193,21 @@ async function loadTempEmails() {
   if (res?.success) state.tempEmails = res.data || [];
 }
 
-async function renderTempEmails(el, actions) {
+async function renderTempEmails(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="generateTempEmail()">+ 生成临时邮箱</button>';
   await loadTempEmails();
 
+  const toolbar = pageToolbarHtml(
+    `${state.tempEmails.length} 个临时邮箱`,
+    '<button class="btn btn-primary btn-sm" onclick="generateTempEmail()">+ 生成临时邮箱</button>'
+  );
+
   if (state.tempEmails.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无临时邮箱</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无临时邮箱</div>';
     return;
   }
 
-  el.innerHTML = `
+  el.innerHTML = toolbar + `
     <div style="display:grid;grid-template-columns:320px 1fr;gap:16px;min-height:500px;">
       <div class="card" style="padding:0;overflow-y:auto;max-height:calc(100vh - 200px)">
         ${state.tempEmails.map(e => `
