@@ -128,11 +128,13 @@ button { cursor: pointer; font-family: inherit; }
   transition: background var(--transition-slow), border-color var(--transition-slow);
 }
 .sidebar-header {
-  padding: 24px 22px;
+  height: var(--topbar-h);
+  padding: 0 22px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 .sidebar-toggle {
   background: none; border: none; color: var(--text-dim);
@@ -148,9 +150,9 @@ button { cursor: pointer; font-family: inherit; }
 .app.sidebar-collapsed .sidebar-title,
 .app.sidebar-collapsed .nav-item span,
 .app.sidebar-collapsed .sidebar-footer span { display: none; }
-.app.sidebar-collapsed .sidebar-header { padding: 18px 12px; justify-content: center; gap: 0; }
+.app.sidebar-collapsed .sidebar-header { padding: 0 12px; justify-content: center; gap: 0; }
 .app.sidebar-collapsed .sidebar-logo { display: none; }
-.app.sidebar-collapsed .sidebar-toggle { margin: 8px auto 0; }
+.app.sidebar-collapsed .sidebar-toggle { margin: 0 auto; }
 .app.sidebar-collapsed .nav { padding: 12px 8px; }
 .app.sidebar-collapsed .nav-item { justify-content: center; padding: 11px 0; }
 .app.sidebar-collapsed .nav-item.active::before { display: none; }
