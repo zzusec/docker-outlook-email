@@ -142,38 +142,45 @@ function navigate(page) {
 function renderPage() {
   const content = document.getElementById('pageContent');
   const title = document.getElementById('topbarTitle');
-  const actions = document.getElementById('topbarActions');
-  actions.innerHTML = '';
 
   switch (currentPage) {
     case 'accounts':
       title.textContent = '邮箱账号';
-      renderAccounts(content, actions);
+      renderAccounts(content);
       break;
     case 'groups':
       title.textContent = '分组管理';
-      renderGroups(content, actions);
+      renderGroups(content);
       break;
     case 'tags':
       title.textContent = '标签管理';
-      renderTags(content, actions);
+      renderTags(content);
       break;
     case 'emails':
       title.textContent = '邮件查看';
-      renderEmails(content, actions);
+      renderEmails(content);
       break;
     case 'temp-emails':
       title.textContent = '临时邮箱';
-      renderTempEmails(content, actions);
+      renderTempEmails(content);
       break;
     case 'settings':
       title.textContent = '系统设置';
-      renderSettings(content, actions);
+      renderSettings(content);
       break;
     default:
       title.textContent = '仪表盘';
       renderDashboard(content);
   }
+}
+
+// Page-level toolbar row: context info on the left, action buttons on the right.
+// Rendered at the top of each page's content (replaces the old topbar button slot).
+function pageToolbarHtml(info, actionsHtml) {
+  return `<div class="page-toolbar">
+    <span class="pt-info">${info || ''}</span>
+    <div class="pt-actions">${actionsHtml || ''}</div>
+  </div>`;
 }
 
 // ========== Dashboard ==========
@@ -197,15 +204,82 @@ async function renderDashboard(el) {
         <div><div style="font-size:28px;font-weight:700;color:${s.color};line-height:1.1">${s.value}</div><div style="color:var(--text-dim);font-size:12.5px;margin-top:2px">${s.label}</div></div>
       </div>`).join('')}
     </div>
-    ${errorCount > 0 ? `<div class="card" style="border-color:rgba(244,63,94,0.2)">
-      <div style="font-size:13px;font-weight:550;color:var(--danger);margin-bottom:10px">异常账号需要处理</div>
-      <div style="font-size:12.5px;color:var(--text-muted)">有 ${errorCount} 个账号 Token 已过期或连接失败，请前往「邮箱账号」页面，点击编辑 →「重新授权」修复。</div>
-    </div>` : ''}
+    ${state.accounts.length > 0 ? dashboardDetailCardsHtml(activeCount, errorCount, disabledCount) : ''}
     ${state.accounts.length === 0 ? `<div class="card" style="text-align:center;padding:40px">
       <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px">还没有添加邮箱账号</div>
       <button class="btn btn-primary" onclick="navigate('accounts')">前往添加</button>
     </div>` : ''}
   `;
+}
+
+// Two glass cards below the stat tiles: account health (status stacked bar +
+// shortcuts to broken accounts) and per-group distribution bars. Pure frontend
+// aggregation over already-loaded state — no extra API calls, free-tier safe.
+function dashboardDetailCardsHtml(activeCount, errorCount, disabledCount) {
+  const total = state.accounts.length;
+  // Status palette (reserved, matches badges): shown with label + count, never color alone
+  const statuses = [
+    { key: 'active', label: '活跃', count: activeCount, color: 'var(--success)' },
+    { key: 'error', label: '异常', count: errorCount, color: 'var(--danger)' },
+    { key: 'disabled', label: '停用', count: disabledCount, color: 'var(--text-dim)' },
+  ];
+  const segments = statuses.filter(s => s.count > 0).map(s =>
+    `<div title="${s.label} ${s.count}" style="width:${(s.count / total * 100).toFixed(1)}%;background:${s.color};border-radius:3px;min-width:6px"></div>`
+  ).join('');
+  const legend = statuses.map(s =>
+    `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)">
+      <span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0"></span>${s.label}
+      <b style="color:var(--text);font-weight:600">${s.count}</b>
+    </span>`
+  ).join('');
+
+  const errorAccounts = state.accounts.filter(a => a.status === 'error').slice(0, 3);
+  const errorList = errorAccounts.length ? `
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">待修复账号（点击直达编辑）</div>
+      ${errorAccounts.map(a => `
+        <div onclick="showEditAccountModal(${a.id})" title="点击打开编辑，重新授权修复"
+             style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;margin-bottom:6px;background:var(--danger-bg);border:1px solid rgba(244,63,94,0.15);border-radius:8px;cursor:pointer">
+          <span style="font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.email)}</span>
+          <span style="font-size:11px;color:var(--danger);flex-shrink:0">去修复 →</span>
+        </div>`).join('')}
+      ${errorCount > 3 ? `<div style="font-size:11px;color:var(--text-dim)">还有 ${errorCount - 3} 个异常账号，<a style="cursor:pointer;color:var(--primary)" onclick="goToAccounts('error')">查看全部</a></div>` : ''}
+    </div>`
+    : `<div style="margin-top:16px;font-size:12.5px;color:var(--success)">✓ 所有账号授权状态正常</div>`;
+
+  // Per-group bars: color follows each group's own user-assigned color
+  const groups = [...state.groups].sort((a, b) => (b.account_count ?? 0) - (a.account_count ?? 0));
+  const topGroups = groups.slice(0, 6);
+  const restCount = groups.slice(6).reduce((n, g) => n + (g.account_count ?? 0), 0);
+  const maxCount = Math.max(1, ...topGroups.map(g => g.account_count ?? 0));
+  const groupBars = topGroups.map(g => {
+    const count = g.account_count ?? 0;
+    return `
+    <div style="margin-bottom:12px" title="${esc(g.name)}: ${count} 个账号">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.name)}</span>
+        <b style="color:var(--text);font-weight:600;flex-shrink:0">${count}</b>
+      </div>
+      <div style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${(count / maxCount * 100).toFixed(1)}%;background:${esc(g.color)};border-radius:4px;min-width:${count > 0 ? 6 : 0}px"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
+      <div class="card">
+        <h3 style="font-size:14px;margin-bottom:14px">账号健康度</h3>
+        <div style="display:flex;gap:2px;height:10px;margin-bottom:10px">${segments}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">${legend}</div>
+        ${errorList}
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin-bottom:14px">分组账号分布</h3>
+        ${groupBars || '<div style="font-size:12.5px;color:var(--text-dim)">暂无分组数据</div>'}
+        ${restCount > 0 ? `<div style="font-size:11px;color:var(--text-dim)">其余 ${groups.length - 6} 个分组共 ${restCount} 个账号</div>` : ''}
+      </div>
+    </div>`;
 }
 
 // Jump to accounts page, optionally pre-filtering by status (from dashboard cards)
@@ -220,17 +294,21 @@ async function loadGroups() {
   if (res?.success) state.groups = res.data || [];
 }
 
-async function renderGroups(el, actions) {
+async function renderGroups(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="showGroupModal()">+ 新建分组</button>';
   await loadGroups();
 
+  const toolbar = pageToolbarHtml(
+    `${state.groups.length} 个分组`,
+    '<button class="btn btn-primary btn-sm" onclick="showGroupModal()">+ 新建分组</button>'
+  );
+
   if (state.groups.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无分组</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无分组</div>';
     return;
   }
 
-  el.innerHTML = `<div class="table-wrap"><table>
+  el.innerHTML = toolbar + `<div class="table-wrap"><table>
     <thead><tr><th>名称</th><th>颜色</th><th>描述</th><th>账号数</th><th>操作</th></tr></thead>
     <tbody>${state.groups.map(g => `<tr>
       <td><span class="color-dot" style="background:${esc(g.color)}"></span>${esc(g.name)}</td>
@@ -279,17 +357,21 @@ async function loadTags() {
   if (res?.success) state.tags = res.data || [];
 }
 
-async function renderTags(el, actions) {
+async function renderTags(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="showTagModal()">+ 新建标签</button>';
   await loadTags();
 
+  const toolbar = pageToolbarHtml(
+    `${state.tags.length} 个标签`,
+    '<button class="btn btn-primary btn-sm" onclick="showTagModal()">+ 新建标签</button>'
+  );
+
   if (state.tags.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无标签。标签可给一个账号打多个，用于跨分组筛选。</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无标签。标签可给一个账号打多个，用于跨分组筛选。</div>';
     return;
   }
 
-  el.innerHTML = `<div class="table-wrap"><table>
+  el.innerHTML = toolbar + `<div class="table-wrap"><table>
     <thead><tr><th>标签</th><th>颜色</th><th>账号数</th><th>操作</th></tr></thead>
     <tbody>${state.tags.map(t => `<tr>
       <td><span class="badge" style="background:${esc(t.color)}22;color:${esc(t.color)}">${esc(t.name)}</span></td>
@@ -335,19 +417,17 @@ async function loadAccounts(groupId) {
   if (res?.success) state.accounts = res.data || [];
 }
 
-async function renderAccounts(el, actions) {
+async function renderAccounts(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadGroups();
   await loadTags();
   await loadAccounts();
 
-  actions.innerHTML = `
-    <button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
-    <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
-    <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>
-  `;
-
-  const toolbar = `<div class="toolbar">
+  // Single sticky row: filters + search + count on the left, page actions on the
+  // right; the batch bar joins it so selection actions stay visible while the
+  // (potentially very long) table scrolls underneath.
+  const toolbar = `<div class="page-sticky">
+  <div class="toolbar" style="margin-bottom:0">
     <select class="form-select" style="width:auto;min-width:140px" id="accountGroupFilter" onchange="filterAccountsByGroup(this.value)">
       <option value="">全部分组</option>
       ${state.groups.map(g => `<option value="${g.id}">${esc(g.name)} (${g.account_count ?? 0})</option>`).join('')}
@@ -363,10 +443,13 @@ async function renderAccounts(el, actions) {
       ${state.tags.map(t => `<option value="${t.id}">${esc(t.name)} (${t.account_count ?? 0})</option>`).join('')}
     </select>
     <input class="search-input" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
-    <div style="flex:1"></div>
-    <span style="font-size:12px;color:var(--text-dim)" id="accountCount">${state.accounts.length} 个账号</span>
+    <span style="font-size:12px;color:var(--text-dim);white-space:nowrap" id="accountCount">${state.accounts.length} 个账号</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
+    <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
+    <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>
   </div>
-  <div id="batchBar" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;display:none;align-items:center;gap:8px;font-size:13px">
+  <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
     <button class="btn btn-sm" onclick="batchAction('move')">移动分组</button>
     <button class="btn btn-sm" onclick="batchAction('enable')">批量启用</button>
@@ -374,20 +457,37 @@ async function renderAccounts(el, actions) {
     <button class="btn btn-sm" onclick="exportSelected()">导出选中</button>
     <button class="btn btn-sm btn-danger" onclick="batchAction('delete')">批量删除</button>
     <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+  </div>
   </div>`;
 
   if (state.accounts.length === 0) {
-    el.innerHTML = toolbar + '<div class="empty-state">暂无账号，点击"添加账号"开始</div>';
+    el.innerHTML = `<div class="accounts-layout">${toolbar}<div class="empty-state">暂无账号，点击"添加账号"开始</div></div>`;
     return;
   }
 
-  el.innerHTML = toolbar + `<div class="table-wrap"><table>
+  el.innerHTML = `<div class="accounts-layout">
+  ${toolbar}
+  <div class="table-wrap accounts-table-wrap"><table>
     <thead><tr>
       <th style="width:32px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)"></th>
       <th>邮箱</th><th>分组</th><th>状态</th><th>备注</th><th>操作</th>
     </tr></thead>
-    <tbody id="accountsBody">${renderAccountRows(state.accounts)}</tbody>
-  </table></div>`;
+    <tbody id="accountsBody"></tbody>
+  </table></div>
+  <div class="page-footer">
+    <span style="font-size:12px;color:var(--text-dim)">每页</span>
+    <select class="form-select" style="width:auto" onchange="accSetPageSize(this.value)">
+      ${[20, 50, 100].map(n => `<option value="${n}" ${n === accPageSize ? 'selected' : ''}>${n}</option>`).join('')}
+    </select>
+    <span style="font-size:12px;color:var(--text-dim)">条</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" id="accPrevBtn" onclick="accTurnPage(-1)">上一页</button>
+    <span id="accPageInfo" style="font-size:12.5px;color:var(--text-muted);min-width:52px;text-align:center"></span>
+    <button class="btn btn-sm" id="accNextBtn" onclick="accTurnPage(1)">下一页</button>
+  </div>
+  </div>`;
+
+  setAccountsView(state.accounts);
 
   // Apply a status filter requested from the dashboard cards (活跃 / 异常)
   if (state.pendingAccountStatus) {
@@ -399,9 +499,57 @@ async function renderAccounts(el, actions) {
 
 var selectedAccountIds = new Set();
 
+// ---- Client-side pagination over the (filtered) account list ----
+var accountsView = [];
+var accPage = 1;
+var accPageSize = parseInt(localStorage.getItem('accPageSize')) || 20;
+
+// Every filter path funnels through here: swap the visible list, reset to page 1
+function setAccountsView(list) {
+  accountsView = list || [];
+  accPage = 1;
+  renderAccountsTable();
+}
+
+function renderAccountsTable() {
+  const tbody = document.getElementById('accountsBody');
+  if (!tbody) return;
+  const totalPages = Math.max(1, Math.ceil(accountsView.length / accPageSize));
+  if (accPage > totalPages) accPage = totalPages;
+  if (accPage < 1) accPage = 1;
+  const start = (accPage - 1) * accPageSize;
+  tbody.innerHTML = renderAccountRows(accountsView.slice(start, start + accPageSize));
+
+  const cnt = document.getElementById('accountCount');
+  if (cnt) cnt.textContent = accountsView.length + ' 个账号';
+  const info = document.getElementById('accPageInfo');
+  if (info) info.textContent = accPage + ' / ' + totalPages;
+  const prev = document.getElementById('accPrevBtn');
+  if (prev) prev.disabled = accPage <= 1;
+  const next = document.getElementById('accNextBtn');
+  if (next) next.disabled = accPage >= totalPages;
+  // Header checkbox only ever refers to the rows on the current page
+  const all = document.getElementById('selectAll');
+  if (all) all.checked = false;
+  const wrap = tbody.closest('.accounts-table-wrap');
+  if (wrap) wrap.scrollTop = 0;
+}
+
+function accSetPageSize(v) {
+  accPageSize = parseInt(v) || 20;
+  localStorage.setItem('accPageSize', String(accPageSize));
+  accPage = 1;
+  renderAccountsTable();
+}
+
+function accTurnPage(delta) {
+  accPage += delta;
+  renderAccountsTable();
+}
+
 function renderAccountRows(accounts) {
   return accounts.map(a => `<tr>
-    <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck()" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
+    <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck(this)" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
     <td>
       <div style="display:flex;align-items:center;gap:6px">
         <a class="email-link" onclick="goToEmail(${a.id})" title="查看该账号邮件">${esc(a.email)}</a>
@@ -422,13 +570,16 @@ function renderAccountRows(accounts) {
   </tr>`).join('');
 }
 
-// Copy text to clipboard
+// Copy text to clipboard. Buttons that contain an icon carry a .btn-label span;
+// swap only that span's text so the icon survives the "已复制" feedback.
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.textContent;
-    btn.textContent = '已复制';
+    const label = btn.querySelector('.btn-label') || btn;
+    const orig = label.textContent;
+    const origOpacity = btn.style.opacity;
+    label.textContent = '已复制';
     btn.style.opacity = '1';
-    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '0.6'; }, 1200);
+    setTimeout(() => { label.textContent = orig; btn.style.opacity = origOpacity; }, 1200);
   }).catch(() => toast('复制失败', 'error'));
 }
 
@@ -481,16 +632,23 @@ function downloadExport() {
   URL.revokeObjectURL(a.href);
 }
 
-// Batch selection
-function onAccountCheck() {
-  selectedAccountIds.clear();
-  document.querySelectorAll('.acc-check:checked').forEach(cb => selectedAccountIds.add(parseInt(cb.value)));
+// Batch selection. Delta-based (not rebuilt from the DOM) so selections
+// survive switching pages — only the current page's rows are in the DOM.
+function onAccountCheck(cb) {
+  const id = parseInt(cb.value);
+  if (cb.checked) selectedAccountIds.add(id);
+  else selectedAccountIds.delete(id);
   updateBatchBar();
 }
 
 function toggleSelectAll(checked) {
-  document.querySelectorAll('.acc-check').forEach(cb => { cb.checked = checked; });
-  onAccountCheck();
+  document.querySelectorAll('.acc-check').forEach(cb => {
+    cb.checked = checked;
+    const id = parseInt(cb.value);
+    if (checked) selectedAccountIds.add(id);
+    else selectedAccountIds.delete(id);
+  });
+  updateBatchBar();
 }
 
 function clearSelection() {
@@ -544,27 +702,19 @@ async function batchAction(action) {
 
 // Filter by status
 function filterAccountsByStatus(status) {
-  const filtered = status ? state.accounts.filter(a => a.status === status) : state.accounts;
-  const tbody = document.getElementById('accountsBody');
-  if (tbody) {
-    tbody.innerHTML = renderAccountRows(filtered);
-    document.getElementById('accountCount').textContent = filtered.length + ' 个账号';
-  }
+  setAccountsView(status ? state.accounts.filter(a => a.status === status) : state.accounts);
 }
 
 async function filterAccountsByGroup(gid) {
   await loadAccounts(gid || undefined);
-  document.getElementById('accountsBody').innerHTML = renderAccountRows(state.accounts);
+  setAccountsView(state.accounts);
 }
 
 async function filterAccountsByTag(tagId) {
   const res = await api(`/accounts${tagId ? '?tag_id=' + tagId : ''}`);
   if (res?.success) {
     state.accounts = res.data || [];
-    const tbody = document.getElementById('accountsBody');
-    if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
-    const cnt = document.getElementById('accountCount');
-    if (cnt) cnt.textContent = state.accounts.length + ' 个账号';
+    setAccountsView(state.accounts);
   }
 }
 
@@ -575,8 +725,7 @@ function searchAccounts(keyword) {
     const res = await api(`/accounts${keyword ? '?keyword=' + encodeURIComponent(keyword) : ''}`);
     if (res?.success) {
       state.accounts = res.data || [];
-      const tbody = document.getElementById('accountsBody');
-      if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
+      setAccountsView(state.accounts);
     }
   }, 300);
 }
@@ -839,7 +988,7 @@ async function deleteAccount(id) {
 }
 
 // ========== Emails ==========
-async function renderEmails(el, actions) {
+async function renderEmails(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
   await loadAccounts();
 
@@ -849,22 +998,32 @@ async function renderEmails(el, actions) {
   }
 
   const activeAccounts = state.accounts.filter(a => a.status !== 'disabled');
+  // Toolbar groups follow scan order: left = pick the mailbox (select + copy its
+  // address), divider, right = act within it (folder, search, refresh).
+  const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
+  const refreshIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>';
   el.innerHTML = `
     <div class="email-layout">
       <div class="email-toolbar">
-        <select class="form-select" style="width:auto;min-width:240px" id="emailAccountSelect" onchange="loadEmailList(this.value)">
-          <option value="">-- 选择账号 --</option>
-          ${activeAccounts.map(a => `<option value="${a.id}">${esc(a.email)}</option>`).join('')}
-        </select>
+        <div class="combo" id="emailAccountCombo" style="min-width:280px">
+          <input class="search-input" id="emailAccountInput" style="width:100%;padding-right:32px" placeholder="点击选择 / 输入关键字筛选账号" autocomplete="off"
+            onfocus="openAccountCombo(this)" onclick="clickAccountCombo(this)" oninput="filterAccountCombo(this.value)" onkeydown="accountComboKeydown(event)">
+          <button class="combo-arrow" type="button" title="展开账号列表" onclick="toggleAccountCombo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <div class="combo-list" id="accountComboList" style="display:none">
+            ${activeAccounts.map(a => `<div class="combo-item" data-id="${a.id}" data-email="${esc(a.email.toLowerCase())}" onclick="pickAccountComboEl(this)">${esc(a.email)}</div>`).join('')}
+            <div class="combo-empty" style="display:none">无匹配账号</div>
+          </div>
+        </div>
+        <button class="btn" onclick="copySelectedEmail(this)" title="复制当前邮箱地址" style="display:inline-flex;align-items:center;gap:6px">${copyIcon}<span class="btn-label">复制</span></button>
+        <span class="vr"></span>
         <select class="form-select" style="width:auto;min-width:100px" id="emailFolder" onchange="onFolderChange()">
           <option value="inbox">收件箱</option>
           <option value="junkemail">垃圾箱</option>
           <option value="deleteditems">已删除</option>
           <option value="all">全部（收件箱+垃圾箱）</option>
         </select>
-        <button class="btn" onclick="copySelectedEmail(this)" title="复制当前邮箱地址">复制邮箱</button>
-        <button class="btn" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
+        <button class="btn" onclick="refreshEmails()" title="重新拉取当前文件夹" style="display:inline-flex;align-items:center;gap:6px">${refreshIcon}<span class="btn-label">刷新</span></button>
         <span style="flex:1"></span>
         <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
@@ -881,14 +1040,79 @@ async function renderEmails(el, actions) {
     </div>
   `;
   if (state.pendingEmailAccount) {
-    const sel = document.getElementById('emailAccountSelect');
-    if (sel) {
-      sel.value = state.pendingEmailAccount;
-      loadEmailList(state.pendingEmailAccount);
+    const acc = state.accounts.find(a => String(a.id) === String(state.pendingEmailAccount));
+    const input = document.getElementById('emailAccountInput');
+    if (acc && input) {
+      input.value = acc.email;
+      loadEmailList(acc.id);
     }
     state.pendingEmailAccount = null;
   }
 }
+
+// ---- Searchable account combobox: a select and a type-to-filter input in one.
+// Focus/arrow shows the full list (select-like); typing narrows it (100+ accounts).
+function openAccountCombo(input) {
+  input.select();
+  filterAccountCombo('');
+}
+
+// Re-open on click when already focused (focus event won't refire)
+function clickAccountCombo(input) {
+  const list = document.getElementById('accountComboList');
+  if (list && list.style.display === 'none') filterAccountCombo(input.value);
+}
+
+function toggleAccountCombo() {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  if (list.style.display === 'none') {
+    filterAccountCombo('');
+    document.getElementById('emailAccountInput')?.focus();
+  } else {
+    list.style.display = 'none';
+  }
+}
+
+function filterAccountCombo(keyword) {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  const kw = (keyword || '').trim().toLowerCase();
+  let visible = 0;
+  list.querySelectorAll('.combo-item').forEach(it => {
+    const hit = !kw || it.dataset.email.includes(kw);
+    it.style.display = hit ? '' : 'none';
+    if (hit) visible++;
+  });
+  const empty = list.querySelector('.combo-empty');
+  if (empty) empty.style.display = visible ? 'none' : '';
+  list.style.display = '';
+}
+
+function pickAccountComboEl(el) {
+  const input = document.getElementById('emailAccountInput');
+  const list = document.getElementById('accountComboList');
+  if (input) input.value = el.textContent.trim();
+  if (list) list.style.display = 'none';
+  loadEmailList(el.dataset.id);
+}
+
+function accountComboKeydown(e) {
+  const list = document.getElementById('accountComboList');
+  if (!list) return;
+  if (e.key === 'Escape') { list.style.display = 'none'; return; }
+  if (e.key === 'Enter') {
+    const first = [...list.querySelectorAll('.combo-item')].find(it => it.style.display !== 'none');
+    if (first) pickAccountComboEl(first);
+  }
+}
+
+// Close the combobox when clicking anywhere outside it
+document.addEventListener('click', (e) => {
+  const combo = document.getElementById('emailAccountCombo');
+  const list = document.getElementById('accountComboList');
+  if (list && combo && !combo.contains(e.target)) list.style.display = 'none';
+});
 
 const EMAIL_PAGE_SIZE = 30;
 
@@ -1179,17 +1403,21 @@ async function loadTempEmails() {
   if (res?.success) state.tempEmails = res.data || [];
 }
 
-async function renderTempEmails(el, actions) {
+async function renderTempEmails(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
-  actions.innerHTML = '<button class="btn btn-primary btn-sm" onclick="generateTempEmail()">+ 生成临时邮箱</button>';
   await loadTempEmails();
 
+  const toolbar = pageToolbarHtml(
+    `${state.tempEmails.length} 个临时邮箱`,
+    '<button class="btn btn-primary btn-sm" onclick="generateTempEmail()">+ 生成临时邮箱</button>'
+  );
+
   if (state.tempEmails.length === 0) {
-    el.innerHTML = '<div class="empty-state">暂无临时邮箱</div>';
+    el.innerHTML = toolbar + '<div class="empty-state">暂无临时邮箱</div>';
     return;
   }
 
-  el.innerHTML = `
+  el.innerHTML = toolbar + `
     <div style="display:grid;grid-template-columns:320px 1fr;gap:16px;min-height:500px;">
       <div class="card" style="padding:0;overflow-y:auto;max-height:calc(100vh - 200px)">
         ${state.tempEmails.map(e => `
@@ -1292,7 +1520,8 @@ async function renderSettings(el) {
   const settings = res?.data || {};
 
   el.innerHTML = `
-    <div class="card" style="max-width:600px">
+    <div class="settings-grid">
+    <div class="card">
       <h3 style="margin-bottom:20px">系统设置</h3>
       <div class="form-group">
         <label class="form-label">登录密码 (当前: ${esc(settings.login_password || '未设置')})</label>
@@ -1309,7 +1538,7 @@ async function renderSettings(el) {
       <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">对外 API</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         用 API Key 免登录拉取邮件（适合脚本自动取验证码）。详见 <a href="https://github.com/roseforyou/cf-outlook-email/blob/main/docs/API.md" target="_blank">API 文档</a>。
@@ -1331,7 +1560,7 @@ async function renderSettings(el) {
       </div>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">定时刷新 Token</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         定时自动刷新账号 Token，让长期不用的号也不过期。Cloudflare 每 6 小时唤醒一次，实际是否执行由下面的「间隔」决定。
@@ -1365,7 +1594,7 @@ async function renderSettings(el) {
       </div>
     </div>
 
-    <div class="card" style="max-width:600px">
+    <div class="card">
       <h3 style="margin-bottom:8px">Telegram 推送新邮件</h3>
       <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
         新邮件到达时推送到 Telegram（适合实时收验证码）。需先 <a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">用 @BotFather 创建机器人</a> 拿到 Bot Token，再给机器人发条消息后用 <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，推送延迟取决于邮件到达时刻与下一次唤醒的间隔，平均约 2~3 分钟、最长约 5 分钟；下面的「间隔」默认 1（每次唤醒都推，即最快），设得比 5 大则进一步拉长。
@@ -1401,6 +1630,7 @@ async function renderSettings(el) {
         <button class="btn" type="button" onclick="testTelegram(this)">发送测试消息</button>
         <button class="btn" type="button" onclick="pushNow(this)">立即推送一轮</button>
       </div>
+    </div>
     </div>
   `;
 }
