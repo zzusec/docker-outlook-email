@@ -412,6 +412,8 @@ tr:hover td { background: var(--bg-hover); }
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+/* Vertical divider between the "which mailbox" and "act within it" groups */
+.email-toolbar .vr { width: 1px; height: 22px; background: var(--border-light); margin: 0 2px; }
 .email-panes {
   display: grid;
   grid-template-columns: 360px 1fr;

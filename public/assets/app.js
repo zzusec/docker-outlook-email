@@ -436,13 +436,16 @@ function renderAccountRows(accounts) {
   </tr>`).join('');
 }
 
-// Copy text to clipboard
+// Copy text to clipboard. Buttons that contain an icon carry a .btn-label span;
+// swap only that span's text so the icon survives the "已复制" feedback.
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.textContent;
-    btn.textContent = '已复制';
+    const label = btn.querySelector('.btn-label') || btn;
+    const orig = label.textContent;
+    const origOpacity = btn.style.opacity;
+    label.textContent = '已复制';
     btn.style.opacity = '1';
-    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '0.6'; }, 1200);
+    setTimeout(() => { label.textContent = orig; btn.style.opacity = origOpacity; }, 1200);
   }).catch(() => toast('复制失败', 'error'));
 }
 
@@ -863,6 +866,10 @@ async function renderEmails(el) {
   }
 
   const activeAccounts = state.accounts.filter(a => a.status !== 'disabled');
+  // Toolbar groups follow scan order: left = pick the mailbox (select + copy its
+  // address), divider, right = act within it (folder, search, refresh).
+  const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
+  const refreshIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>';
   el.innerHTML = `
     <div class="email-layout">
       <div class="email-toolbar">
@@ -870,15 +877,16 @@ async function renderEmails(el) {
           <option value="">-- 选择账号 --</option>
           ${activeAccounts.map(a => `<option value="${a.id}">${esc(a.email)}</option>`).join('')}
         </select>
+        <button class="btn" onclick="copySelectedEmail(this)" title="复制当前邮箱地址" style="display:inline-flex;align-items:center;gap:6px">${copyIcon}<span class="btn-label">复制</span></button>
+        <span class="vr"></span>
         <select class="form-select" style="width:auto;min-width:100px" id="emailFolder" onchange="onFolderChange()">
           <option value="inbox">收件箱</option>
           <option value="junkemail">垃圾箱</option>
           <option value="deleteditems">已删除</option>
           <option value="all">全部（收件箱+垃圾箱）</option>
         </select>
-        <button class="btn" onclick="copySelectedEmail(this)" title="复制当前邮箱地址">复制邮箱</button>
-        <button class="btn" onclick="refreshEmails()">刷新</button>
         <input class="search-input" id="emailSearch" placeholder="搜索邮件..." onkeydown="if(event.key==='Enter')searchEmails()">
+        <button class="btn" onclick="refreshEmails()" title="重新拉取当前文件夹" style="display:inline-flex;align-items:center;gap:6px">${refreshIcon}<span class="btn-label">刷新</span></button>
         <span style="flex:1"></span>
         <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
