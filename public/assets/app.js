@@ -204,15 +204,82 @@ async function renderDashboard(el) {
         <div><div style="font-size:28px;font-weight:700;color:${s.color};line-height:1.1">${s.value}</div><div style="color:var(--text-dim);font-size:12.5px;margin-top:2px">${s.label}</div></div>
       </div>`).join('')}
     </div>
-    ${errorCount > 0 ? `<div class="card" style="border-color:rgba(244,63,94,0.2)">
-      <div style="font-size:13px;font-weight:550;color:var(--danger);margin-bottom:10px">异常账号需要处理</div>
-      <div style="font-size:12.5px;color:var(--text-muted)">有 ${errorCount} 个账号 Token 已过期或连接失败，请前往「邮箱账号」页面，点击编辑 →「重新授权」修复。</div>
-    </div>` : ''}
+    ${state.accounts.length > 0 ? dashboardDetailCardsHtml(activeCount, errorCount, disabledCount) : ''}
     ${state.accounts.length === 0 ? `<div class="card" style="text-align:center;padding:40px">
       <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px">还没有添加邮箱账号</div>
       <button class="btn btn-primary" onclick="navigate('accounts')">前往添加</button>
     </div>` : ''}
   `;
+}
+
+// Two glass cards below the stat tiles: account health (status stacked bar +
+// shortcuts to broken accounts) and per-group distribution bars. Pure frontend
+// aggregation over already-loaded state — no extra API calls, free-tier safe.
+function dashboardDetailCardsHtml(activeCount, errorCount, disabledCount) {
+  const total = state.accounts.length;
+  // Status palette (reserved, matches badges): shown with label + count, never color alone
+  const statuses = [
+    { key: 'active', label: '活跃', count: activeCount, color: 'var(--success)' },
+    { key: 'error', label: '异常', count: errorCount, color: 'var(--danger)' },
+    { key: 'disabled', label: '停用', count: disabledCount, color: 'var(--text-dim)' },
+  ];
+  const segments = statuses.filter(s => s.count > 0).map(s =>
+    `<div title="${s.label} ${s.count}" style="width:${(s.count / total * 100).toFixed(1)}%;background:${s.color};border-radius:3px;min-width:6px"></div>`
+  ).join('');
+  const legend = statuses.map(s =>
+    `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)">
+      <span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0"></span>${s.label}
+      <b style="color:var(--text);font-weight:600">${s.count}</b>
+    </span>`
+  ).join('');
+
+  const errorAccounts = state.accounts.filter(a => a.status === 'error').slice(0, 3);
+  const errorList = errorAccounts.length ? `
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">待修复账号（点击直达编辑）</div>
+      ${errorAccounts.map(a => `
+        <div onclick="showEditAccountModal(${a.id})" title="点击打开编辑，重新授权修复"
+             style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;margin-bottom:6px;background:var(--danger-bg);border:1px solid rgba(244,63,94,0.15);border-radius:8px;cursor:pointer">
+          <span style="font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.email)}</span>
+          <span style="font-size:11px;color:var(--danger);flex-shrink:0">去修复 →</span>
+        </div>`).join('')}
+      ${errorCount > 3 ? `<div style="font-size:11px;color:var(--text-dim)">还有 ${errorCount - 3} 个异常账号，<a style="cursor:pointer;color:var(--primary)" onclick="goToAccounts('error')">查看全部</a></div>` : ''}
+    </div>`
+    : `<div style="margin-top:16px;font-size:12.5px;color:var(--success)">✓ 所有账号授权状态正常</div>`;
+
+  // Per-group bars: color follows each group's own user-assigned color
+  const groups = [...state.groups].sort((a, b) => (b.account_count ?? 0) - (a.account_count ?? 0));
+  const topGroups = groups.slice(0, 6);
+  const restCount = groups.slice(6).reduce((n, g) => n + (g.account_count ?? 0), 0);
+  const maxCount = Math.max(1, ...topGroups.map(g => g.account_count ?? 0));
+  const groupBars = topGroups.map(g => {
+    const count = g.account_count ?? 0;
+    return `
+    <div style="margin-bottom:12px" title="${esc(g.name)}: ${count} 个账号">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.name)}</span>
+        <b style="color:var(--text);font-weight:600;flex-shrink:0">${count}</b>
+      </div>
+      <div style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${(count / maxCount * 100).toFixed(1)}%;background:${esc(g.color)};border-radius:4px;min-width:${count > 0 ? 6 : 0}px"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
+      <div class="card">
+        <h3 style="font-size:14px;margin-bottom:14px">账号健康度</h3>
+        <div style="display:flex;gap:2px;height:10px;margin-bottom:10px">${segments}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">${legend}</div>
+        ${errorList}
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin-bottom:14px">分组账号分布</h3>
+        ${groupBars || '<div style="font-size:12.5px;color:var(--text-dim)">暂无分组数据</div>'}
+        ${restCount > 0 ? `<div style="font-size:11px;color:var(--text-dim)">其余 ${groups.length - 6} 个分组共 ${restCount} 个账号</div>` : ''}
+      </div>
+    </div>`;
 }
 
 // Jump to accounts page, optionally pre-filtering by status (from dashboard cards)
