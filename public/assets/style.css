@@ -512,6 +512,15 @@ tr:hover td { background: var(--bg-hover); }
 /* Settings page: cards flow into responsive columns (wide screens 2-3 cols,
    narrow screens 1 col) instead of a single stacked column. */
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+
+/* Sticky page toolbar (accounts page): filters + actions + batch bar stay
+   visible right below the topbar while the long table scrolls underneath. */
+.page-sticky {
+  position: sticky; top: var(--topbar-h); z-index: 40;
+  background: var(--bg);
+  padding: 2px 0 12px; margin-bottom: 12px;
+  transition: background var(--transition-slow);
+}
 .toolbar .search-input, .email-toolbar .search-input {
   padding: 8px 14px; background: var(--bg-input);
   border: 1px solid var(--border-light); border-radius: 8px;

@@ -423,14 +423,11 @@ async function renderAccounts(el) {
   await loadTags();
   await loadAccounts();
 
-  const pageBar = pageToolbarHtml(
-    `<span id="accountCount">${state.accounts.length} 个账号</span>`,
-    `<button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
-     <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
-     <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>`
-  );
-
-  const toolbar = pageBar + `<div class="toolbar">
+  // Single sticky row: filters + search + count on the left, page actions on the
+  // right; the batch bar joins it so selection actions stay visible while the
+  // (potentially very long) table scrolls underneath.
+  const toolbar = `<div class="page-sticky">
+  <div class="toolbar" style="margin-bottom:0">
     <select class="form-select" style="width:auto;min-width:140px" id="accountGroupFilter" onchange="filterAccountsByGroup(this.value)">
       <option value="">全部分组</option>
       ${state.groups.map(g => `<option value="${g.id}">${esc(g.name)} (${g.account_count ?? 0})</option>`).join('')}
@@ -446,8 +443,13 @@ async function renderAccounts(el) {
       ${state.tags.map(t => `<option value="${t.id}">${esc(t.name)} (${t.account_count ?? 0})</option>`).join('')}
     </select>
     <input class="search-input" placeholder="搜索邮箱或备注..." oninput="searchAccounts(this.value)">
+    <span style="font-size:12px;color:var(--text-dim);white-space:nowrap" id="accountCount">${state.accounts.length} 个账号</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">+ 添加账号</button>
+    <button class="btn btn-sm" onclick="showImportModal()">批量导入</button>
+    <button class="btn btn-sm" onclick="exportAccounts()">导出全部</button>
   </div>
-  <div id="batchBar" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;display:none;align-items:center;gap:8px;font-size:13px">
+  <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
     <button class="btn btn-sm" onclick="batchAction('move')">移动分组</button>
     <button class="btn btn-sm" onclick="batchAction('enable')">批量启用</button>
@@ -455,6 +457,7 @@ async function renderAccounts(el) {
     <button class="btn btn-sm" onclick="exportSelected()">导出选中</button>
     <button class="btn btn-sm btn-danger" onclick="batchAction('delete')">批量删除</button>
     <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+  </div>
   </div>`;
 
   if (state.accounts.length === 0) {
