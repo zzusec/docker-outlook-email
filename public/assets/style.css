@@ -513,14 +513,23 @@ tr:hover td { background: var(--bg-hover); }
    narrow screens 1 col) instead of a single stacked column. */
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
 
-/* Sticky page toolbar (accounts page): filters + actions + batch bar stay
-   visible right below the topbar while the long table scrolls underneath. */
+/* Sticky page toolbar (accounts page). The accounts layout is viewport-fit
+   (table scrolls internally), so this rarely engages; when the page does
+   scroll (short viewports), pin 28px below the topbar to mirror the
+   content padding. No background — nothing scrolls beneath it normally. */
 .page-sticky {
-  position: sticky; top: var(--topbar-h); z-index: 40;
-  background: var(--bg);
-  padding: 2px 0 12px; margin-bottom: 12px;
-  transition: background var(--transition-slow);
+  position: sticky; top: calc(var(--topbar-h) + 28px); z-index: 40;
+  flex-shrink: 0;
+  margin-bottom: 14px;
 }
+
+/* Accounts page: viewport-fit column — toolbar row, internally-scrolling
+   table with a pinned header, pagination footer. The page itself doesn't
+   scroll, so toolbar and pager stay in view however long the list is. */
+.accounts-layout { display: flex; flex-direction: column; height: calc(100vh - var(--topbar-h) - 56px); }
+.accounts-table-wrap { flex: 1; min-height: 0; overflow-y: auto; }
+.accounts-table-wrap thead th { position: sticky; top: 0; z-index: 5; background: var(--bg-card-solid); }
+.page-footer { display: flex; align-items: center; gap: 10px; padding: 12px 2px 0; flex-shrink: 0; flex-wrap: wrap; }
 .toolbar .search-input, .email-toolbar .search-input {
   padding: 8px 14px; background: var(--bg-input);
   border: 1px solid var(--border-light); border-radius: 8px;

@@ -461,17 +461,33 @@ async function renderAccounts(el) {
   </div>`;
 
   if (state.accounts.length === 0) {
-    el.innerHTML = toolbar + '<div class="empty-state">暂无账号，点击"添加账号"开始</div>';
+    el.innerHTML = `<div class="accounts-layout">${toolbar}<div class="empty-state">暂无账号，点击"添加账号"开始</div></div>`;
     return;
   }
 
-  el.innerHTML = toolbar + `<div class="table-wrap"><table>
+  el.innerHTML = `<div class="accounts-layout">
+  ${toolbar}
+  <div class="table-wrap accounts-table-wrap"><table>
     <thead><tr>
       <th style="width:32px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)"></th>
       <th>邮箱</th><th>分组</th><th>状态</th><th>备注</th><th>操作</th>
     </tr></thead>
-    <tbody id="accountsBody">${renderAccountRows(state.accounts)}</tbody>
-  </table></div>`;
+    <tbody id="accountsBody"></tbody>
+  </table></div>
+  <div class="page-footer">
+    <span style="font-size:12px;color:var(--text-dim)">每页</span>
+    <select class="form-select" style="width:auto" onchange="accSetPageSize(this.value)">
+      ${[20, 50, 100].map(n => `<option value="${n}" ${n === accPageSize ? 'selected' : ''}>${n}</option>`).join('')}
+    </select>
+    <span style="font-size:12px;color:var(--text-dim)">条</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" id="accPrevBtn" onclick="accTurnPage(-1)">上一页</button>
+    <span id="accPageInfo" style="font-size:12.5px;color:var(--text-muted);min-width:52px;text-align:center"></span>
+    <button class="btn btn-sm" id="accNextBtn" onclick="accTurnPage(1)">下一页</button>
+  </div>
+  </div>`;
+
+  setAccountsView(state.accounts);
 
   // Apply a status filter requested from the dashboard cards (活跃 / 异常)
   if (state.pendingAccountStatus) {
@@ -483,9 +499,57 @@ async function renderAccounts(el) {
 
 var selectedAccountIds = new Set();
 
+// ---- Client-side pagination over the (filtered) account list ----
+var accountsView = [];
+var accPage = 1;
+var accPageSize = parseInt(localStorage.getItem('accPageSize')) || 20;
+
+// Every filter path funnels through here: swap the visible list, reset to page 1
+function setAccountsView(list) {
+  accountsView = list || [];
+  accPage = 1;
+  renderAccountsTable();
+}
+
+function renderAccountsTable() {
+  const tbody = document.getElementById('accountsBody');
+  if (!tbody) return;
+  const totalPages = Math.max(1, Math.ceil(accountsView.length / accPageSize));
+  if (accPage > totalPages) accPage = totalPages;
+  if (accPage < 1) accPage = 1;
+  const start = (accPage - 1) * accPageSize;
+  tbody.innerHTML = renderAccountRows(accountsView.slice(start, start + accPageSize));
+
+  const cnt = document.getElementById('accountCount');
+  if (cnt) cnt.textContent = accountsView.length + ' 个账号';
+  const info = document.getElementById('accPageInfo');
+  if (info) info.textContent = accPage + ' / ' + totalPages;
+  const prev = document.getElementById('accPrevBtn');
+  if (prev) prev.disabled = accPage <= 1;
+  const next = document.getElementById('accNextBtn');
+  if (next) next.disabled = accPage >= totalPages;
+  // Header checkbox only ever refers to the rows on the current page
+  const all = document.getElementById('selectAll');
+  if (all) all.checked = false;
+  const wrap = tbody.closest('.accounts-table-wrap');
+  if (wrap) wrap.scrollTop = 0;
+}
+
+function accSetPageSize(v) {
+  accPageSize = parseInt(v) || 20;
+  localStorage.setItem('accPageSize', String(accPageSize));
+  accPage = 1;
+  renderAccountsTable();
+}
+
+function accTurnPage(delta) {
+  accPage += delta;
+  renderAccountsTable();
+}
+
 function renderAccountRows(accounts) {
   return accounts.map(a => `<tr>
-    <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck()" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
+    <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck(this)" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
     <td>
       <div style="display:flex;align-items:center;gap:6px">
         <a class="email-link" onclick="goToEmail(${a.id})" title="查看该账号邮件">${esc(a.email)}</a>
@@ -568,16 +632,23 @@ function downloadExport() {
   URL.revokeObjectURL(a.href);
 }
 
-// Batch selection
-function onAccountCheck() {
-  selectedAccountIds.clear();
-  document.querySelectorAll('.acc-check:checked').forEach(cb => selectedAccountIds.add(parseInt(cb.value)));
+// Batch selection. Delta-based (not rebuilt from the DOM) so selections
+// survive switching pages — only the current page's rows are in the DOM.
+function onAccountCheck(cb) {
+  const id = parseInt(cb.value);
+  if (cb.checked) selectedAccountIds.add(id);
+  else selectedAccountIds.delete(id);
   updateBatchBar();
 }
 
 function toggleSelectAll(checked) {
-  document.querySelectorAll('.acc-check').forEach(cb => { cb.checked = checked; });
-  onAccountCheck();
+  document.querySelectorAll('.acc-check').forEach(cb => {
+    cb.checked = checked;
+    const id = parseInt(cb.value);
+    if (checked) selectedAccountIds.add(id);
+    else selectedAccountIds.delete(id);
+  });
+  updateBatchBar();
 }
 
 function clearSelection() {
@@ -631,27 +702,19 @@ async function batchAction(action) {
 
 // Filter by status
 function filterAccountsByStatus(status) {
-  const filtered = status ? state.accounts.filter(a => a.status === status) : state.accounts;
-  const tbody = document.getElementById('accountsBody');
-  if (tbody) {
-    tbody.innerHTML = renderAccountRows(filtered);
-    document.getElementById('accountCount').textContent = filtered.length + ' 个账号';
-  }
+  setAccountsView(status ? state.accounts.filter(a => a.status === status) : state.accounts);
 }
 
 async function filterAccountsByGroup(gid) {
   await loadAccounts(gid || undefined);
-  document.getElementById('accountsBody').innerHTML = renderAccountRows(state.accounts);
+  setAccountsView(state.accounts);
 }
 
 async function filterAccountsByTag(tagId) {
   const res = await api(`/accounts${tagId ? '?tag_id=' + tagId : ''}`);
   if (res?.success) {
     state.accounts = res.data || [];
-    const tbody = document.getElementById('accountsBody');
-    if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
-    const cnt = document.getElementById('accountCount');
-    if (cnt) cnt.textContent = state.accounts.length + ' 个账号';
+    setAccountsView(state.accounts);
   }
 }
 
@@ -662,8 +725,7 @@ function searchAccounts(keyword) {
     const res = await api(`/accounts${keyword ? '?keyword=' + encodeURIComponent(keyword) : ''}`);
     if (res?.success) {
       state.accounts = res.data || [];
-      const tbody = document.getElementById('accountsBody');
-      if (tbody) tbody.innerHTML = renderAccountRows(state.accounts);
+      setAccountsView(state.accounts);
     }
   }, 300);
 }
