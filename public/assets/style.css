@@ -135,6 +135,8 @@ button { cursor: pointer; font-family: inherit; }
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+  /* Clip (don't wrap) the title while the expand/collapse width animates */
+  overflow: hidden;
 }
 .sidebar-toggle {
   background: none; border: none; color: var(--text-dim);
@@ -170,7 +172,7 @@ button { cursor: pointer; font-family: inherit; }
   box-shadow: 0 2px 12px var(--primary-glow);
 }
 .sidebar-logo svg { width: 18px; height: 18px; color: #fff; }
-.sidebar-header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
+.sidebar-header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; white-space: nowrap; }
 .nav { flex: 1; padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .nav-item {
   display: flex;
@@ -182,6 +184,10 @@ button { cursor: pointer; font-family: inherit; }
   font-weight: 460;
   cursor: pointer;
   transition: all var(--transition);
+  /* Keep labels on one line during the sidebar width animation — clip
+     instead of wrapping into a vertical sliver of characters */
+  white-space: nowrap;
+  overflow: hidden;
   border: none;
   background: none;
   width: 100%;
@@ -213,6 +219,7 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--text-dim); background: none; border: none;
   font-size: 13px; padding: 8px 0; width: 100%;
   transition: color var(--transition);
+  white-space: nowrap; overflow: hidden;
 }
 .logout-btn:hover { color: var(--danger); }
 .repo-link {
@@ -220,6 +227,7 @@ button { cursor: pointer; font-family: inherit; }
   color: var(--text-dim); font-size: 13px;
   padding: 8px 0; margin-bottom: 4px;
   transition: color var(--transition);
+  white-space: nowrap; overflow: hidden;
 }
 .repo-link:hover { color: var(--primary-light); }
 .repo-link svg { flex-shrink: 0; }

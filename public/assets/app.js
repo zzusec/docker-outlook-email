@@ -1788,7 +1788,26 @@ function restoreSidebar() {
 }
 
 // ========== Init ==========
+// Suppress browser autofill dropdowns (saved addresses / contacts) on every
+// rendered input, current and future. The whole UI is built via innerHTML, so
+// instead of hand-annotating each template we stamp autocomplete="off" on any
+// input/textarea that doesn't declare its own autocomplete attribute, as nodes
+// are added.
+function applyAutocompleteOff(node) {
+  if (node.nodeType !== 1) return;
+  if (node.matches('input:not([autocomplete]), textarea:not([autocomplete])')) {
+    node.setAttribute('autocomplete', 'off');
+  }
+  node.querySelectorAll('input:not([autocomplete]), textarea:not([autocomplete])')
+    .forEach(el => el.setAttribute('autocomplete', 'off'));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  applyAutocompleteOff(document.body);
+  new MutationObserver(muts => {
+    for (const m of muts) m.addedNodes.forEach(applyAutocompleteOff);
+  }).observe(document.body, { childList: true, subtree: true });
+
   restoreSidebar();
   const authed = await checkAuth();
   if (authed) navigate('dashboard');
