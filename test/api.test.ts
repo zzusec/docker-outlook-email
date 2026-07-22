@@ -130,3 +130,55 @@ describe('verifyPassword', () => {
     expect(result).toBe(false);
   });
 });
+
+// Regression: saving a new refresh_token must clear a stale 'error' status
+// (the error verdict referred to the old token), while a deliberate
+// 'disabled' status must never be auto-changed.
+describe('accounts route: status recovery on token update', () => {
+  const baseAccount = {
+    id: 5,
+    email: 'a@b.c',
+    password: '',
+    client_id: 'cid',
+    refresh_token: 'old-token',
+    group_id: 1,
+    remark: '',
+    status: 'error',
+  };
+
+  async function putAccount(body: object, account: Record<string, unknown> = baseAccount) {
+    const accountsRoute = (await import('../src/routes/accounts')).default;
+    const mockDB = createMockDB();
+    mockDB._stmt.first.mockResolvedValue(account);
+    const res = await accountsRoute.request(
+      `/${account.id}`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      { DB: mockDB } as any
+    );
+    // The full UPDATE binds 8 params:
+    // [email, password, client_id, refresh_token, group_id, remark, status, id]
+    const updateCall = mockDB._stmt.bind.mock.calls.find((args) => args.length === 8);
+    return { res, updateCall };
+  }
+
+  it('resets error to active when a new refresh_token is saved', async () => {
+    const { res, updateCall } = await putAccount({ refresh_token: 'brand-new-token' });
+    expect(res.status).toBe(200);
+    expect(updateCall).toBeDefined();
+    expect(updateCall![3]).toBe('brand-new-token');
+    expect(updateCall![6]).toBe('active');
+  });
+
+  it('keeps error status when no new token is provided', async () => {
+    const { updateCall } = await putAccount({ remark: 'note' });
+    expect(updateCall![6]).toBe('error');
+  });
+
+  it('does not re-enable a disabled account on token save', async () => {
+    const { updateCall } = await putAccount(
+      { refresh_token: 'brand-new-token' },
+      { ...baseAccount, status: 'disabled' }
+    );
+    expect(updateCall![6]).toBe('disabled');
+  });
+});
