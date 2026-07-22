@@ -334,6 +334,12 @@ accounts.put('/:id', async (c) => {
     return badRequest('邮箱、Client ID 和 Refresh Token 不能为空');
   }
 
+  // A newly supplied refresh_token invalidates a stale 'error' verdict (the
+  // error referred to the old token). Deliberate 'disabled' is never auto-changed.
+  const status =
+    body.status ??
+    (body.refresh_token?.trim() && existing.status === 'error' ? 'active' : existing.status);
+
   try {
     await run(
       c.env.DB,
@@ -346,7 +352,7 @@ accounts.put('/:id', async (c) => {
         refreshToken,
         body.group_id ?? existing.group_id,
         body.remark ?? existing.remark,
-        body.status ?? existing.status,
+        status,
         id,
       ]
     );

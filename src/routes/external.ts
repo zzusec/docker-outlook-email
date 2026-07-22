@@ -55,6 +55,9 @@ external.get('/emails', async (c) => {
       "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [tok.newRefreshToken, acc.id]
     );
+  } else if (acc.status === 'error') {
+    // Token works without rotation: clear the stale error flag
+    await run(c.env.DB, "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
   }
 
   const result = await fetchEmails(tok.token, { folder, top, skip: 0, keyword });

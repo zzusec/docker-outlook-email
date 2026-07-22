@@ -25,6 +25,10 @@ async function getTokenAndRefresh(
       'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [result.newRefreshToken, 'active', acc.id]
     );
+  } else if (acc.status === 'error') {
+    // Token works without rotation (e.g. right after a manual re-auth):
+    // clear the stale error flag so the account shows healthy again
+    await run(db, "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
   }
 
   return { token: result.token };
