@@ -261,6 +261,11 @@ button { cursor: pointer; font-family: inherit; }
 }
 .theme-btn:hover { color: var(--text-secondary); }
 .theme-btn.active { background: var(--primary-bg); color: var(--primary); }
+/* Language toggle reuses the theme-toggle pill; text labels need a bit more room */
+.lang-btn {
+  width: auto; min-width: 28px; padding: 0 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.2px;
+}
 
 /* ===== Buttons ===== */
 .btn {
@@ -579,6 +584,8 @@ tr:hover td { background: var(--bg-hover); }
   .topbar { padding: 0 16px; }
   .modal { width: 95vw; padding: 20px; }
   .theme-toggle { display: none; }
+  /* Keep the language switch reachable on small screens */
+  #langToggle { display: flex; }
 }
 
 /* ===== Circle Swoop theme transition ===== */

@@ -4,7 +4,7 @@
 
 **Lightweight Outlook email manager powered by Cloudflare Workers**
 
-🆓 100% Free · ☁️ No Server Required · 🌍 Global CDN · 🌗 Dark/Light Theme
+🆓 100% Free · ☁️ No Server Required · 🌍 Global CDN · 🌗 Dark/Light Theme · 🌐 Bilingual UI
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -35,6 +35,7 @@
 - 📨 **Email Reading** — Read inbox / junk / deleted via Microsoft Graph API with folder switching, aggregated view, paginated load-more, search and HTML rendering
 - 📭 **Temp Email** — GPTMail API integration for disposable email addresses
 - 🎨 **Polished Themes** — Dark / Light / Auto with glassmorphism, circle-swoop transition & ambient breathing glow
+- 🌐 **Bilingual UI** — Chinese by default, one-click switch to English in the topbar, preference remembered locally, backend messages translated on display
 - 🆓 **Completely Free** — Runs on Cloudflare's free tier, no credit card needed
 
 ## 🚀 Quick Deploy
@@ -112,10 +113,13 @@ Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format:
 - [x] 📎 Attachment download
 - [x] 🏷️ Tag system (multiple tags per account, cross-group filtering)
 - [x] ⏰ Scheduled token refresh (Cron Trigger, configurable interval/batch, keeps accounts alive)
+- [x] 🤖 Telegram push for new emails (cron polling, near-real-time delivery, configurable interval)
+- [x] 🧭 UI polish (per-page toolbars, dashboard health cards, responsive settings grid, paginated accounts table, searchable account combobox)
+- [x] 🌐 UI internationalization (Chinese default, one-click English)
 
 **Planned (PRs welcome)**
 
-- [ ] 🤖 Telegram push for new emails
+- [ ] 🔔 More push channels (WeCom / DingTalk etc.)
 
 > ⚠️ Due to Cloudflare Workers platform limits, the following are not feasible: IMAP (Gmail / QQ / 163 and other non-Microsoft mailboxes), SMTP forwarding, HTTP/SOCKS5 proxy.
 

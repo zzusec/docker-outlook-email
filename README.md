@@ -4,7 +4,7 @@
 
 **基于 Cloudflare Workers 的轻量级 Outlook 邮件管理工具**
 
-🆓 完全免费 · ☁️ 无需服务器 · 🌍 全球加速 · 🌗 深浅主题
+🆓 完全免费 · ☁️ 无需服务器 · 🌍 全球加速 · 🌗 深浅主题 · 🌐 中英双语
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -35,6 +35,7 @@
 - 📨 **邮件阅读** — 通过 Microsoft Graph API 实时读取，支持收件箱/垃圾箱/已删除文件夹切换、聚合视图、分页加载、搜索和 HTML 渲染
 - 📭 **临时邮箱** — 集成 GPTMail API，一键生成临时邮箱接收邮件
 - 🎨 **精致主题** — 深色/浅色/跟随系统，毛玻璃质感 + 圆形扫掠切换 + 低频呼吸光晕
+- 🌐 **中英双语** — 默认中文，顶栏一键切换 English，偏好本地记忆，后端消息同步翻译
 - 🆓 **完全免费** — 运行在 Cloudflare 免费层，无需信用卡
 
 ## 🚀 快速部署
@@ -127,6 +128,8 @@ tools/                   辅助脚本
 - [x] 🏷️ 标签系统（一个账号多标签，跨分组筛选）
 - [x] ⏰ 定时刷新 Token（Cron Trigger，可配间隔/批量，自动保活账号）
 - [x] 🤖 Telegram 推送新邮件（Cron 轮询，新邮件实时推送到 Telegram，可配间隔）
+- [x] 🧭 界面打磨（页面级工具栏、仪表盘健康度卡片、设置页响应式网格、账号表分页、可搜索账号下拉）
+- [x] 🌐 界面国际化（默认中文，一键切换 English）
 
 **计划中（欢迎 PR）**
 
