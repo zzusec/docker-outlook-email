@@ -2,34 +2,33 @@ import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { first, run } from '../db';
 import { ok, notFound, badRequest } from '../response';
-import { getMailAccessToken, fetchEmails, fetchEmailDetail, deleteEmail, listAttachments, getAttachment } from '../graph';
+import { getAccessToken, fetchEmails, fetchEmailDetail, deleteEmail, listAttachments, getAttachment } from '../graph';
 
 const emails = new Hono<{ Bindings: Env }>();
 
-// Helper: get token and auto-save rotated refresh_token.
-// Also upgrades IMAP-only RTs to Graph Mail so bulk-imported Hotmail works.
+// Helper: get token and auto-save rotated refresh_token
 async function getTokenAndRefresh(
   db: D1Database,
   acc: AccountRow
 ): Promise<{ token?: string; error?: string }> {
-  const result = await getMailAccessToken(acc.client_id, acc.refresh_token);
+  const result = await getAccessToken(acc.client_id, acc.refresh_token);
 
   if (!result.token) {
     await run(db, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', acc.id]);
     return { error: result.error?.message ?? 'Token acquisition failed' };
   }
 
-  // Always persist a rotated refresh_token. Microsoft invalidates the previous
-  // one after a successful refresh; dropping the new value breaks the account.
-  // Also clear any prior 'error' status when the token works again.
+  // Auto-save new refresh_token if Microsoft rotated it
   if (result.newRefreshToken && result.newRefreshToken !== acc.refresh_token) {
     await run(
       db,
       'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [result.newRefreshToken, 'active', acc.id]
     );
-  } else if (acc.status !== 'active') {
-    await run(db, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['active', acc.id]);
+  } else if (acc.status === 'error') {
+    // Token works without rotation (e.g. right after a manual re-auth):
+    // clear the stale error flag so the account shows healthy again
+    await run(db, "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
   }
 
   return { token: result.token };

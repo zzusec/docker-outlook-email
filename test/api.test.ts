@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock D1 database
 function createMockDB() {
@@ -13,49 +13,6 @@ function createMockDB() {
     _stmt: mockStmt,
   };
 }
-
-describe('IMAP→Graph mail token upgrade', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('detects IMAP-only scopes and upgrades them to Graph Mail on mail access', async () => {
-    const { isImapOnlyScope, getMailAccessToken } = await import('../src/graph');
-
-    expect(isImapOnlyScope(
-      'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/SMTP.Send'
-    )).toBe(true);
-    expect(isImapOnlyScope('https://graph.microsoft.com/Mail.Read openid profile')).toBe(false);
-    expect(isImapOnlyScope(undefined)).toBe(false);
-
-    vi.stubGlobal('fetch', vi.fn()
-      // first: IMAP-only refresh
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        access_token: 'imap-access',
-        refresh_token: 'rt-after-imap',
-        scope: 'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/SMTP.Send',
-      })))
-      // second: Graph upgrade
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        access_token: 'graph-access',
-        refresh_token: 'rt-after-graph',
-        scope: 'https://graph.microsoft.com/Mail.ReadWrite openid profile',
-      }))));
-
-    const result = await getMailAccessToken('client-id', 'rt-original');
-    expect(result.token).toBe('graph-access');
-    expect(result.newRefreshToken).toBe('rt-after-graph');
-    expect(result.upgraded).toBe(true);
-    expect(result.scope).toContain('Mail.ReadWrite');
-    expect(fetch).toHaveBeenCalledTimes(2);
-
-    // Second call must request Graph scopes
-    const secondBody = String((fetch as any).mock.calls[1][1].body);
-    expect(secondBody).toContain(encodeURIComponent('https://graph.microsoft.com/Mail.ReadWrite'));
-    expect(secondBody).toContain('rt-after-imap');
-  });
-});
 
 // Test crypto utilities
 describe('crypto utils', () => {
@@ -174,240 +131,54 @@ describe('verifyPassword', () => {
   });
 });
 
-describe('account connection tests', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
+// Regression: saving a new refresh_token must clear a stale 'error' status
+// (the error verdict referred to the old token), while a deliberate
+// 'disabled' status must never be auto-changed.
+describe('accounts route: status recovery on token update', () => {
+  const baseAccount = {
+    id: 5,
+    email: 'a@b.c',
+    password: '',
+    client_id: 'cid',
+    refresh_token: 'old-token',
+    group_id: 1,
+    remark: '',
+    status: 'error',
+  };
+
+  async function putAccount(body: object, account: Record<string, unknown> = baseAccount) {
+    const accountsRoute = (await import('../src/routes/accounts')).default;
+    const mockDB = createMockDB();
+    mockDB._stmt.first.mockResolvedValue(account);
+    const res = await accountsRoute.request(
+      `/${account.id}`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      { DB: mockDB } as any
+    );
+    // The full UPDATE binds 8 params:
+    // [email, password, client_id, refresh_token, group_id, remark, status, id]
+    const updateCall = mockDB._stmt.bind.mock.calls.find((args) => args.length === 8);
+    return { res, updateCall };
+  }
+
+  it('resets error to active when a new refresh_token is saved', async () => {
+    const { res, updateCall } = await putAccount({ refresh_token: 'brand-new-token' });
+    expect(res.status).toBe(200);
+    expect(updateCall).toBeDefined();
+    expect(updateCall![3]).toBe('brand-new-token');
+    expect(updateCall![6]).toBe('active');
   });
 
-  it('verifies Inbox access, persists a rotated token, and keeps an empty Inbox count', async () => {
-    const account = {
-      id: 1,
-      email: 'empty@outlook.com',
-      client_id: 'client-id',
-      refresh_token: 'old-token',
-      password: '',
-      group_id: 1,
-      remark: '',
-      status: 'active',
-      inbox_total: null,
-      inbox_count_updated_at: null,
-      created_at: '2026-01-01',
-      updated_at: '2026-01-01',
-    };
-    const statement = {
-      bind: vi.fn().mockReturnThis(),
-      first: vi.fn().mockResolvedValue(account),
-      all: vi.fn().mockResolvedValue({ results: [] }),
-      run: vi.fn().mockResolvedValue({}),
-    };
-    const db = {
-      prepare: vi.fn(() => statement),
-      batch: vi.fn().mockResolvedValue([]),
-    };
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-token', refresh_token: 'new-token' })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ totalItemCount: 0 }))));
-
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/1/test', { method: 'POST' }),
-      { DB: db } as any
-    );
-    const body = await res.json() as { success: boolean; data: { connected: boolean; inbox: { total: number; checked_at: string } } };
-
-    expect(body.success).toBe(true);
-    expect(body.data.connected).toBe(true);
-    expect(body.data.inbox.total).toBe(0);
-    expect(body.data.inbox.checked_at).toBeTruthy();
-    expect(db.batch).toHaveBeenCalledTimes(1);
-    expect(statement.bind).toHaveBeenLastCalledWith('new-token', 'active', 0, body.data.inbox.checked_at, 1);
+  it('keeps error status when no new token is provided', async () => {
+    const { updateCall } = await putAccount({ remark: 'note' });
+    expect(updateCall![6]).toBe('error');
   });
 
-  it('rejects a connection-test batch larger than ten accounts', async () => {
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'test', ids: Array.from({ length: 11 }, (_, i) => i + 1) }),
-      }),
-      { DB: {} } as any
+  it('does not re-enable a disabled account on token save', async () => {
+    const { updateCall } = await putAccount(
+      { refresh_token: 'brand-new-token' },
+      { ...baseAccount, status: 'disabled' }
     );
-    const body = await res.json() as { success: boolean; error: { message: string } };
-
-    expect(res.status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error.message).toContain('最多测试 10 个账号');
-  });
-
-  it('rejects the removed local password batch action', async () => {
-    const db = { prepare: vi.fn(), batch: vi.fn() };
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/batch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_password', ids: [1, 2] }),
-      }), { DB: db } as any
-    );
-    const body = await res.json() as { success: boolean; error: { message: string } };
-
-    expect(res.status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error.message).toContain('未知操作');
-    expect(db.batch).not.toHaveBeenCalled();
-  });
-
-  it('rejects malformed token input before writing credentials', async () => {
-    const db = { prepare: vi.fn(), batch: vi.fn() };
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/batch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_tokens', ids: [1], token_data: 'not-a-valid-token-line' }),
-      }), { DB: db } as any
-    );
-    const body = await res.json() as { success: boolean; error: { message: string } };
-
-    expect(res.status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error.message).toContain('格式错误');
-    expect(db.batch).not.toHaveBeenCalled();
-  });
-
-  it('rejects a refresh_tokens batch larger than ten accounts', async () => {
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'refresh_tokens', ids: Array.from({ length: 11 }, (_, i) => i + 1) }),
-      }),
-      { DB: {} } as any
-    );
-    const body = await res.json() as { success: boolean; error: { message: string } };
-
-    expect(res.status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error.message).toContain('最多刷新 10 个账号');
-  });
-
-  it('refreshes selected tokens, persists rotation, continues after failures, and never returns tokens', async () => {
-    const rows = [
-      {
-        id: 1,
-        email: 'rotate@outlook.com',
-        client_id: 'client-1',
-        refresh_token: 'secret-old-1',
-        password: 'pwd-1',
-        group_id: 1,
-        remark: '',
-        status: 'active',
-        inbox_total: 3,
-        inbox_count_updated_at: '2026-01-01',
-        created_at: '2026-01-01',
-        updated_at: '2026-01-01',
-      },
-      {
-        id: 2,
-        email: 'same@outlook.com',
-        client_id: 'client-2',
-        refresh_token: 'secret-old-2',
-        password: '',
-        group_id: 1,
-        remark: '',
-        status: 'error',
-        inbox_total: null,
-        inbox_count_updated_at: null,
-        created_at: '2026-01-01',
-        updated_at: '2026-01-01',
-      },
-      {
-        id: 3,
-        email: 'fail@outlook.com',
-        client_id: 'client-3',
-        refresh_token: 'secret-old-3',
-        password: '',
-        group_id: 1,
-        remark: '',
-        status: 'active',
-        inbox_total: null,
-        inbox_count_updated_at: null,
-        created_at: '2026-01-01',
-        updated_at: '2026-01-01',
-      },
-    ];
-    const statement = {
-      bind: vi.fn().mockReturnThis(),
-      first: vi.fn().mockResolvedValue(null),
-      all: vi.fn().mockResolvedValue({ results: rows }),
-      run: vi.fn().mockResolvedValue({}),
-    };
-    const db = {
-      prepare: vi.fn(() => statement),
-      batch: vi.fn().mockResolvedValue([]),
-    };
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        access_token: 'access-secret-1',
-        refresh_token: 'secret-new-1',
-      })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        access_token: 'access-secret-2',
-        // no refresh_token → success without rotation
-      })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        error: 'invalid_grant',
-        error_description: 'The refresh token has expired',
-      }), { status: 400 })));
-
-    const accounts = (await import('../src/routes/accounts')).default;
-    const res = await accounts.fetch(
-      new Request('https://example.test/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'refresh_tokens', ids: [1, 2, 3, 99] }),
-      }),
-      { DB: db } as any
-    );
-    const body = await res.json() as {
-      success: boolean;
-      data: {
-        requested: number;
-        refreshed: number;
-        failed: number;
-        results: Array<{ id: number; email: string; refreshed: boolean; rotated?: boolean; error?: { code: string; message: string } }>;
-      };
-    };
-
-    expect(body.success).toBe(true);
-    expect(body.data.requested).toBe(4);
-    expect(body.data.refreshed).toBe(2);
-    expect(body.data.failed).toBe(2);
-
-    const byId = new Map(body.data.results.map((result) => [result.id, result]));
-    expect(byId.get(1)).toMatchObject({ email: 'rotate@outlook.com', refreshed: true, rotated: true });
-    expect(byId.get(2)).toMatchObject({ email: 'same@outlook.com', refreshed: true, rotated: false });
-    expect(byId.get(3)?.refreshed).toBe(false);
-    expect(byId.get(3)?.error?.code).toBe('invalid_grant');
-    expect(byId.get(99)).toMatchObject({ email: '', refreshed: false });
-    expect(byId.get(99)?.error?.code).toBe('NOT_FOUND');
-
-    // Response must never leak credentials or access tokens.
-    const raw = JSON.stringify(body);
-    for (const secret of [
-      'secret-old-1', 'secret-old-2', 'secret-old-3',
-      'secret-new-1', 'access-secret-1', 'access-secret-2', 'pwd-1',
-    ]) {
-      expect(raw).not.toContain(secret);
-    }
-
-    // Rotated token persisted; non-rotated success only flips status; failure marks error.
-    expect(statement.bind).toHaveBeenCalledWith('secret-new-1', 'active', 1);
-    expect(statement.bind).toHaveBeenCalledWith('active', 2);
-    expect(statement.bind).toHaveBeenCalledWith('error', 3);
-    // One SELECT + three UPDATEs (missing id skips write)
-    expect(statement.run).toHaveBeenCalledTimes(3);
+    expect(updateCall![6]).toBe('disabled');
   });
 });

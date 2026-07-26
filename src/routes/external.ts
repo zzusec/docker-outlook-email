@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { first, run } from '../db';
 import { ok, fail } from '../response';
-import { getMailAccessToken, fetchEmails } from '../graph';
+import { getAccessToken, fetchEmails } from '../graph';
 
 // External API: fetch emails by API key, no login required.
 // Mounted BEFORE the cookie auth middleware so it is not gated by sessions.
@@ -43,20 +43,20 @@ external.get('/emails', async (c) => {
   if (!acc) return fail('NOT_FOUND', '账号不存在', 404);
   if (acc.status === 'disabled') return fail('DISABLED', '该账号已停用', 400);
 
-  const tok = await getMailAccessToken(acc.client_id, acc.refresh_token);
+  const tok = await getAccessToken(acc.client_id, acc.refresh_token);
   if (!tok.token) {
     await run(c.env.DB, "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
     return fail('TOKEN_FAILED', tok.error?.message || 'Token 获取失败', 502);
   }
-  // Always persist a rotated refresh_token; Microsoft invalidates the old one.
-  // Also clear prior error status when the token works again.
+  // Persist a rotated refresh_token if Microsoft issued one
   if (tok.newRefreshToken && tok.newRefreshToken !== acc.refresh_token) {
     await run(
       c.env.DB,
       "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [tok.newRefreshToken, acc.id]
     );
-  } else if (acc.status !== 'active') {
+  } else if (acc.status === 'error') {
+    // Token works without rotation: clear the stale error flag
     await run(c.env.DB, "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
   }
 
