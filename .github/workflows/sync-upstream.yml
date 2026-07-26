@@ -27,19 +27,20 @@ jobs:
       behind: ${{ steps.sync.outputs.behind }}
       conflicts: ${{ steps.sync.outputs.conflicts }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      # 不开 pnpm 缓存：官网没更新时这个 job 根本不会跑 pnpm install，
+      # 缓存保存阶段找不到 store 目录会把整个 run 标成失败。
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: pnpm
 
       - name: 配置提交身份
         run: |
