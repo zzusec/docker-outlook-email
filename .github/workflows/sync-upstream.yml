@@ -1,0 +1,126 @@
+name: Sync upstream
+
+# 每天自动从官网仓库 roseforyou/cf-outlook-email 拉取更新。
+# 规则：
+#   - 干净合并 + 类型检查 + 单元测试全过  → 推 main 并自动部署
+#   - 有冲突，或自检不过                  → 一律不推、不部署，只开 Issue 通知
+on:
+  schedule:
+    # UTC 18:23 = 北京时间次日 02:23
+    - cron: '23 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.sync.outputs.state }}
+      sha: ${{ steps.sync.outputs.sha }}
+      behind: ${{ steps.sync.outputs.behind }}
+      conflicts: ${{ steps.sync.outputs.conflicts }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 配置提交身份
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      # state 取值：uptodate / ready / conflict / verify-failed
+      - name: 合并官网更新并自检
+        id: sync
+        run: |
+          state=uptodate
+          sha=""
+          conflicts=""
+
+          git remote add upstream https://github.com/roseforyou/cf-outlook-email.git
+          git fetch --quiet upstream main
+          behind=$(git rev-list --count HEAD..upstream/main)
+          echo "官网领先本仓库 ${behind} 个提交"
+
+          if [ "$behind" -gt 0 ]; then
+            git log --oneline --no-decorate HEAD..upstream/main
+            if git merge --no-edit upstream/main; then
+              # 自检不需要任何 Cloudflare 凭据：build 是 tsc --noEmit，test 是 vitest。
+              if pnpm install --no-frozen-lockfile && pnpm run build && pnpm run test; then
+                state=ready
+                sha=$(git rev-parse HEAD)
+              else
+                state=verify-failed
+              fi
+            else
+              conflicts=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+              git merge --abort || true
+              state=conflict
+            fi
+          fi
+
+          echo "结果：${state}"
+          {
+            echo "state=${state}"
+            echo "sha=${sha}"
+            echo "behind=${behind}"
+            echo "conflicts=${conflicts}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 推送到 main
+        if: steps.sync.outputs.state == 'ready'
+        run: git push origin main
+
+      # 冲突或自检失败时，生产环境完全不动，只留一个 Issue 等人处理。
+      # 同名 Issue 已存在就追加评论，避免每天刷一个新的。
+      - name: 需要人工处理 → 开 Issue
+        if: steps.sync.outputs.state == 'conflict' || steps.sync.outputs.state == 'verify-failed'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATE: ${{ steps.sync.outputs.state }}
+          BEHIND: ${{ steps.sync.outputs.behind }}
+          CONFLICTS: ${{ steps.sync.outputs.conflicts }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='官网更新需要人工合并'
+          if [ "$STATE" = "conflict" ]; then
+            reason="合并官网更新时发生冲突，冲突文件：\`${CONFLICTS:-未记录}\`"
+          else
+            reason='官网更新能干净合并，但类型检查或单元测试没通过'
+          fi
+          body=$(printf '%s\n\n- 官网领先本仓库 **%s** 个提交\n- 原因：%s\n- 运行日志：%s\n\n生产环境未做任何改动，线上仍是上一个已验证版本。\n' \
+            '自动同步已停下，等待人工处理。' "$BEHIND" "$reason" "$RUN_URL")
+
+          existing=$(gh issue list --state open --search "in:title ${title}" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+  # 只有 state=ready 才走到这里，部署合并后的那个 commit。
+  deploy:
+    needs: sync
+    if: needs.sync.outputs.state == 'ready'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.sync.outputs.sha }}

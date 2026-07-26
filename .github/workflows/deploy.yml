@@ -1,0 +1,96 @@
+name: Deploy
+
+# 部署到 Cloudflare Workers。三种触发方式：
+#   1. push 到 main（改了代码就上线）
+#   2. 手动运行（Actions 页面点 Run workflow）
+#   3. 被 sync-upstream.yml 调用（同步官网成功后自动上线指定 commit）
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 要部署的 commit（留空则用触发时的 commit）
+        type: string
+        required: false
+
+# 同一时间只允许一个生产部署，且不取消正在跑的那个。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # 上游合并可能带来新依赖，所以不用 --frozen-lockfile。
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
+
+      # wrangler.toml 含账号私密 ID，被 .gitignore 排除，所以在 CI 里现生成。
+      - name: 生成 wrangler.toml
+        env:
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+        run: |
+          if [ -z "${D1_DATABASE_ID}" ]; then
+            echo "::error::缺少仓库 secret D1_DATABASE_ID"
+            exit 1
+          fi
+          sed "s|REPLACE_WITH_YOUR_DATABASE_ID|${D1_DATABASE_ID}|" \
+            wrangler.toml.example > wrangler.toml
+          if grep -q REPLACE_WITH wrangler.toml; then
+            echo "::error::wrangler.toml 仍残留占位符，wrangler.toml.example 结构可能变了"
+            exit 1
+          fi
+
+      - name: 类型检查
+        run: pnpm run build
+
+      - name: 单元测试
+        run: pnpm run test
+
+      - name: 应用 D1 迁移
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply outlook-email-db --remote
+
+      - name: 部署 Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+
+      # 线上取一次静态资源，确认新版本真的在服务，而不是只“部署成功”。
+      - name: 线上冒烟检查
+        run: |
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              https://outlook-email.hx10-vip.workers.dev/assets/app.js || true)
+            if [ "$code" = "200" ]; then
+              echo "线上 /assets/app.js 返回 200"
+              exit 0
+            fi
+            echo "第 $i 次收到 HTTP $code，5 秒后重试"
+            sleep 5
+          done
+          echo "::error::部署后线上未返回 200，请检查 Worker 日志"
+          exit 1
