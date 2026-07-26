@@ -178,7 +178,7 @@ function normalizeMessage(raw: AnyRec): GraphMailMessage {
     hasAttachments: Boolean(pick(raw, 'hasAttachments', 'HasAttachments')),
     body: bodyRaw
       ? {
-          contentType: String(pick(bodyRaw, 'contentType', 'ContentType') ?? 'text'),
+          contentType: String(pick(bodyRaw, 'contentType', 'ContentType') ?? 'text').trim().toLowerCase(),
           content: String(pick(bodyRaw, 'content', 'Content') ?? ''),
         }
       : undefined,

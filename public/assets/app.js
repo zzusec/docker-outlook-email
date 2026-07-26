@@ -1270,7 +1270,9 @@ async function viewEmail(index) {
   }
 
   const e = res.data;
-  const bodyContent = e.body?.contentType === 'html'
+  const bodyType = String(e.body?.contentType || '').trim().toLowerCase();
+  const isHtmlBody = bodyType === 'html';
+  const bodyContent = isHtmlBody
     ? `<iframe id="emailFrame" sandbox="allow-same-origin" onload="resizeFrame(this)"></iframe>`
     : `<pre style="white-space:pre-wrap;font-family:inherit">${esc(e.body?.content || e.bodyPreview || '')}</pre>`;
 
@@ -1293,7 +1295,7 @@ async function viewEmail(index) {
 
   if (e.hasAttachments) loadAttachments(e.id);
 
-  if (e.body?.contentType === 'html') {
+  if (isHtmlBody) {
     const frame = document.getElementById('emailFrame');
     if (frame) {
       const doc = frame.contentDocument;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 
 // Mock D1 database
 function createMockDB() {
@@ -180,5 +180,42 @@ describe('accounts route: status recovery on token update', () => {
       { ...baseAccount, status: 'disabled' }
     );
     expect(updateCall![6]).toBe('disabled');
+  });
+});
+
+describe('email detail fallback', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('normalizes uppercase Outlook REST HTML content type after Graph rejects the token', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        Id: 'message-id',
+        Subject: 'HTML email',
+        From: { EmailAddress: { Name: 'Sender', Address: 'sender@example.com' } },
+        ToRecipients: [],
+        CcRecipients: [],
+        ReceivedDateTime: '2026-07-26T12:00:00Z',
+        BodyPreview: 'Preview',
+        IsRead: false,
+        HasAttachments: false,
+        Body: { ContentType: ' HTML ', Content: '<strong>Rendered email</strong>' },
+      })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchEmailDetail } = await import('../src/graph');
+    const result = await fetchEmailDetail('access-token', 'message-id');
+
+    expect(result.error).toBeUndefined();
+    expect(result.item?.body).toEqual({
+      contentType: 'html',
+      content: '<strong>Rendered email</strong>',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('graph.microsoft.com');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('outlook.office.com');
   });
 });
