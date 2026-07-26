@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 
 // Mock D1 database
@@ -217,5 +218,20 @@ describe('email detail fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toContain('graph.microsoft.com');
     expect(String(fetchMock.mock.calls[1][0])).toContain('outlook.office.com');
+  });
+});
+
+describe('email body viewer HTML document detection', () => {
+  it('renders only complete HTML documents when providers mislabel them as text', async () => {
+    const appSource = await readFile(new URL('../public/assets/app.js', import.meta.url), 'utf8');
+    const functionSource = appSource.match(/function isFullHtmlDocument\(content\) \{[\s\S]*?\n\}/)?.[0];
+    expect(functionSource).toBeTruthy();
+
+    const isFullHtmlDocument = new Function(`${functionSource}; return isFullHtmlDocument;`)() as (content: string) => boolean;
+    expect(isFullHtmlDocument('<!DOCTYPE html><html lang="en"><head></head><body>Code</body></html>')).toBe(true);
+    expect(isFullHtmlDocument('﻿ \n<HTML lang="en"><body>Code</body></html>')).toBe(true);
+    expect(isFullHtmlDocument('<div>HTML fragment</div>')).toBe(false);
+    expect(isFullHtmlDocument('Source code: <html lang="en">')).toBe(false);
+    expect(isFullHtmlDocument('&lt;html lang="en"&gt;')).toBe(false);
   });
 });

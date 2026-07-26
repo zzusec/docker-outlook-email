@@ -1251,6 +1251,10 @@ function searchEmails() {
   if (state.selectedAccount) loadEmailList(state.selectedAccount);
 }
 
+function isFullHtmlDocument(content) {
+  return /^[﻿\s]*<(?:!doctype\s+html(?:\s[^>]*)?|html(?:\s[^>]*)?)>/i.test(String(content || ''));
+}
+
 async function viewEmail(index) {
   const email = state.emailList[index];
   if (!email) return;
@@ -1270,11 +1274,13 @@ async function viewEmail(index) {
   }
 
   const e = res.data;
+  const body = e.body?.content || e.bodyPreview || '';
   const bodyType = String(e.body?.contentType || '').trim().toLowerCase();
-  const isHtmlBody = bodyType === 'html';
+  const isFullHtmlBody = Boolean(e.body?.content) && isFullHtmlDocument(body);
+  const isHtmlBody = bodyType === 'html' || isFullHtmlBody;
   const bodyContent = isHtmlBody
     ? `<iframe id="emailFrame" sandbox="allow-same-origin" onload="resizeFrame(this)"></iframe>`
-    : `<pre style="white-space:pre-wrap;font-family:inherit">${esc(e.body?.content || e.bodyPreview || '')}</pre>`;
+    : `<pre style="white-space:pre-wrap;font-family:inherit">${esc(body)}</pre>`;
 
   pane.innerHTML = `
     <div class="detail-pane" style="border:none;padding:0">
@@ -1300,7 +1306,10 @@ async function viewEmail(index) {
     if (frame) {
       const doc = frame.contentDocument;
       doc.open();
-      doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;color:#333;margin:12px;}</style></head><body>${e.body.content}</body></html>`);
+      doc.write(isFullHtmlBody
+        ? body
+        : `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;color:#333;margin:12px;}</style></head><body>${body}</body></html>`
+      );
       doc.close();
     }
   }
