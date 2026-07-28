@@ -276,6 +276,7 @@ describe('frontend account count and settings layout', () => {
     expect(appSource).toContain('if (page !== currentPage) previousPage = currentPage;');
     expect(appSource).toContain("previousPage !== 'emails' ? previousPage : 'accounts'");
     expect(appSource).toContain('onclick="goBackFromEmails()"');
+    expect(appSource.indexOf('onclick="refreshEmails()"')).toBeLessThan(appSource.indexOf('onclick="goBackFromEmails()"'));
   });
 });
 

@@ -1037,8 +1037,6 @@ async function renderEmails(el) {
   el.innerHTML = `
     <div class="email-layout">
       <div class="email-toolbar">
-        <button class="btn" type="button" onclick="goBackFromEmails()" title="${t('返回上一页')}">${backIcon}<span class="btn-label">${t('返回')}</span></button>
-        <span class="vr"></span>
         <div class="combo" id="emailAccountCombo" style="min-width:280px">
           <input class="search-input" id="emailAccountInput" style="width:100%;padding-right:32px" placeholder="${t('点击选择 / 输入关键字筛选账号')}" autocomplete="off"
             onfocus="openAccountCombo(this)" onclick="clickAccountCombo(this)" oninput="filterAccountCombo(this.value)" onkeydown="accountComboKeydown(event)">
@@ -1058,6 +1056,7 @@ async function renderEmails(el) {
         </select>
         <input class="search-input" id="emailSearch" placeholder="${t('搜索邮件...')}" onkeydown="if(event.key==='Enter')searchEmails()">
         <button class="btn" onclick="refreshEmails()" title="${t('重新拉取当前文件夹')}" style="display:inline-flex;align-items:center;gap:6px">${refreshIcon}<span class="btn-label">${t('刷新')}</span></button>
+        <button class="btn" type="button" onclick="goBackFromEmails()" title="${t('返回上一页')}">${backIcon}<span class="btn-label">${t('返回')}</span></button>
         <span style="flex:1"></span>
         <span id="emailBatchActions" style="display:flex;align-items:center;gap:6px"></span>
         <span style="font-size:12px;color:var(--text-dim)" id="emailCount"></span>
