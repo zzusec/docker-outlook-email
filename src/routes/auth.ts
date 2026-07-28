@@ -18,7 +18,7 @@ auth.post('/login', async (c) => {
   if (!c.env.COOKIE_SECRET) {
     return fail(
       'CONFIG_MISSING',
-      '服务端未配置 COOKIE_SECRET：请运行 wrangler secret put COOKIE_SECRET',
+      '服务端未配置 COOKIE_SECRET',
       500
     );
   }

@@ -25,7 +25,7 @@ app.onError((err, c) => {
   if (/no such table|no such column/i.test(msg)) {
     return fail(
       'DB_NOT_READY',
-      '数据库未就绪：远程库可能没迁移。请运行 wrangler d1 migrations apply outlook-email-db --remote',
+      '数据库未就绪：请检查数据库迁移（Cloudflare 请运行 wrangler d1 migrations apply outlook-email-db --remote；Docker 会在启动时自动迁移）',
       500
     );
   }
@@ -39,7 +39,7 @@ app.onError((err, c) => {
   if (/key|HMAC|crypto|importKey/i.test(msg)) {
     return fail(
       'CONFIG_MISSING',
-      '服务端密钥未配置：请用 wrangler secret put 设置 COOKIE_SECRET（和 ADMIN_PASSWORD）',
+      '服务端密钥未配置：请设置 COOKIE_SECRET（以及 ADMIN_PASSWORD）',
       500
     );
   }

@@ -2,10 +2,13 @@
   "name": "cf-outlook-email",
   "version": "2.0.0",
   "private": true,
+  "packageManager": "pnpm@11.10.0",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "wrangler dev",
     "build": "tsc --noEmit",
+    "build:server": "tsc -p tsconfig.server.json --noEmit && esbuild server/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/server.mjs",
+    "start:server": "node dist/server.mjs",
     "deploy": "wrangler deploy",
     "install:cf": "bash ./install.sh",
     "db:migrate": "wrangler d1 migrations apply outlook-email-db",
@@ -13,10 +16,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.12",
     "hono": "^4.7.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250525.0",
+    "@types/node": "^24.13.3",
+    "esbuild": "^0.28.1",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0",
     "wrangler": "^4.18.0"

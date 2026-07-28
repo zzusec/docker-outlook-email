@@ -1,0 +1,15 @@
+services:
+  outlook-email:
+    build: .
+    image: cf-outlook-email:local
+    container_name: outlook-email
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 8787
+      DATABASE_PATH: /data/outlook-email.db
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8787}:8787"
+    volumes:
+      - ./data:/data

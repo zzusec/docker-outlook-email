@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.wrangler
+node_modules
+dist
+data
+.env
+.env.*
+*.db
+*.db-*
+*.log
+docs
+issues
+test
+tools
+README*.md

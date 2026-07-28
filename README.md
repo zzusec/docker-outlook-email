@@ -17,7 +17,7 @@
 
 ⚠️ 此按钮**无法一键部署**：项目依赖 D1 数据库与 Secret，需手动建库、跑迁移、设密钥，按钮会因框架检测失败而报错。请按 📖 [详细部署教程](./docs/GUIDE.md) 操作（约 5 分钟）。
 
-🌐 [English](./README_EN.md) · 📖 [详细部署教程](./docs/GUIDE.md) · 🔌 [对外 API 文档](./docs/API.md)
+🌐 [English](./README_EN.md) · 📖 [Cloudflare 部署教程](./docs/GUIDE.md) · 🐳 [Docker 服务器部署](./docs/DOCKER.md) · 🔌 [对外 API 文档](./docs/API.md)
 
 </div>
 
@@ -82,6 +82,18 @@ pnpm exec wrangler deploy
 
 部署完成后访问输出的 URL，用设置的密码登录即可。🎉
 
+### 方式三：Docker 服务器部署
+
+Docker 模式使用本地 SQLite 持久化数据，并在容器内运行原有定时任务。已有 Cloudflare D1 数据也可以导入：
+
+```bash
+cp .env.example .env
+# 编辑 .env 后启动
+docker compose up -d --build
+```
+
+完整配置、HTTPS 反向代理和 D1 数据迁移步骤见 [Docker 服务器部署文档](./docs/DOCKER.md)。
+
 ## 📮 添加邮箱
 
 登录后点击 **添加账号** → **一键授权** → 弹出微软登录窗口 → 授权后自动填入凭证 → 保存。
@@ -92,12 +104,12 @@ pnpm exec wrangler deploy
 
 | 层 | 技术 |
 |---|---|
-| ⚙️ 运行时 | Cloudflare Workers (TypeScript) |
+| ⚙️ 运行时 | Cloudflare Workers 或 Node.js (Docker) |
 | 🧭 路由 | Hono |
-| 🗄️ 数据库 | Cloudflare D1 (SQLite) |
+| 🗄️ 数据库 | Cloudflare D1 或本地 SQLite |
 | 🎨 前端 | 原生 HTML/CSS/JS |
 | 📧 邮件 | Microsoft Graph API |
-| 🚀 部署 | Wrangler |
+| 🚀 部署 | Wrangler 或 Docker Compose |
 
 ## 🗂️ 项目结构
 
@@ -108,8 +120,11 @@ src/                     后端源码（Worker）
 ├── graph.ts             Graph API 集成
 ├── routes/              业务路由（6 个模块）
 └── utils/               加密、校验工具
+server/                  Node.js 入口 + SQLite/D1 兼容层
 public/                  前端（静态 SPA）
 migrations/              D1 数据库建表
+Dockerfile               Docker 镜像
+docker-compose.yml       服务器编排与数据持久化
 tools/                   辅助脚本
 ```
 
