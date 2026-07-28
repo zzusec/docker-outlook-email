@@ -268,4 +268,13 @@ describe('frontend account count and settings layout', () => {
     expect(appSource).toContain('class="settings-overview"');
     expect(appSource).toContain('class="settings-grid"');
   });
+
+  it('returns from the email viewer to its actual in-app source page', async () => {
+    const appSource = await readFile(new URL('../public/assets/app.js', import.meta.url), 'utf8');
+
+    expect(appSource).toContain("let previousPage = 'accounts';");
+    expect(appSource).toContain('if (page !== currentPage) previousPage = currentPage;');
+    expect(appSource).toContain("previousPage !== 'emails' ? previousPage : 'accounts'");
+    expect(appSource).toContain('onclick="goBackFromEmails()"');
+  });
 });

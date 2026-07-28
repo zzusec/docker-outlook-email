@@ -216,6 +216,8 @@ var I18N_EN = {
   '暂无标签，可去「标签管理」创建': 'No tags yet - create them on the Tags page',
 
   // --- Emails page ---
+  '返回': 'Back',
+  '返回上一页': 'Back to previous page',
   '暂无邮箱账号，请先添加账号': 'No email accounts yet - add one first',
   '点击选择 / 输入关键字筛选账号': 'Click to pick / type to filter accounts',
   '展开账号列表': 'Show account list',

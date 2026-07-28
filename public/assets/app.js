@@ -68,6 +68,7 @@ function setTheme(theme, evt) {
 
 const API = '/api';
 let currentPage = 'accounts';
+let previousPage = 'accounts';
 let state = {
   groups: [],
   tags: [],
@@ -133,11 +134,16 @@ async function logout() {
 
 // ========== Navigation ==========
 function navigate(page) {
+  if (page !== currentPage) previousPage = currentPage;
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
   renderPage();
+}
+
+function goBackFromEmails() {
+  navigate(previousPage && previousPage !== 'emails' ? previousPage : 'accounts');
 }
 
 function renderPage() {
@@ -1025,11 +1031,14 @@ async function renderEmails(el) {
   const activeAccounts = state.accounts.filter(a => a.status !== 'disabled');
   // Toolbar groups follow scan order: left = pick the mailbox (select + copy its
   // address), divider, right = act within it (folder, search, refresh).
+  const backIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>';
   const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
   const refreshIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>';
   el.innerHTML = `
     <div class="email-layout">
       <div class="email-toolbar">
+        <button class="btn" type="button" onclick="goBackFromEmails()" title="${t('返回上一页')}">${backIcon}<span class="btn-label">${t('返回')}</span></button>
+        <span class="vr"></span>
         <div class="combo" id="emailAccountCombo" style="min-width:280px">
           <input class="search-input" id="emailAccountInput" style="width:100%;padding-right:32px" placeholder="${t('点击选择 / 输入关键字筛选账号')}" autocomplete="off"
             onfocus="openAccountCombo(this)" onclick="clickAccountCombo(this)" oninput="filterAccountCombo(this.value)" onkeydown="accountComboKeydown(event)">
