@@ -278,3 +278,18 @@ describe('frontend account count and settings layout', () => {
     expect(appSource).toContain('onclick="goBackFromEmails()"');
   });
 });
+
+describe('static asset deployment cache policy', () => {
+  it('revalidates stable asset names and cache-busts the current release', async () => {
+    const serverSource = await readFile(new URL('../server/index.ts', import.meta.url), 'utf8');
+    const indexSource = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+    const loginSource = await readFile(new URL('../public/login.html', import.meta.url), 'utf8');
+
+    expect(serverSource).toContain("c.header('Cache-Control', 'no-cache')");
+    expect(serverSource).not.toContain('max-age=3600');
+    expect(indexSource).toContain('/assets/style.css?v=20260728-1');
+    expect(indexSource).toContain('/assets/i18n.js?v=20260728-1');
+    expect(indexSource).toContain('/assets/app.js?v=20260728-1');
+    expect(loginSource).toContain('/assets/i18n.js?v=20260728-1');
+  });
+});

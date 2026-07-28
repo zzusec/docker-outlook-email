@@ -61,7 +61,9 @@ async function main(): Promise<void> {
     '/assets/*',
     serveStatic({
       root: './public',
-      onFound: (_path, c) => c.header('Cache-Control', 'public, max-age=3600'),
+      // Asset filenames are stable (not content-hashed), so browsers must
+      // revalidate them after a deployment instead of serving an hour-old UI.
+      onFound: (_path, c) => c.header('Cache-Control', 'no-cache'),
     })
   );
   app.get('/', serveStatic({ path: './public/index.html' }));
