@@ -548,13 +548,37 @@ function accTurnPage(delta) {
   renderAccountsTable();
 }
 
+function accountInboxCountHtml(account) {
+  const rawTotal = account?.inbox?.total;
+  const hasCount = rawTotal !== null && rawTotal !== undefined && rawTotal !== '' && Number.isFinite(Number(rawTotal));
+  const total = hasCount ? Math.max(0, Number(rawTotal)) : null;
+  const checkedAt = account?.inbox?.checked_at;
+  const normalizedDate = checkedAt && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(checkedAt)
+    ? checkedAt.replace(' ', 'T') + 'Z'
+    : checkedAt;
+  const checkedTime = normalizedDate ? Date.parse(normalizedDate) : NaN;
+  const isStale = hasCount && Number.isFinite(checkedTime) && Date.now() - checkedTime > 24 * 60 * 60 * 1000;
+  const className = hasCount
+    ? `inbox-count${isStale ? ' inbox-count-stale' : ''}`
+    : 'inbox-count inbox-count-unavailable';
+  let title = hasCount
+    ? t('收件箱邮件数：{n}', { n: total.toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN') })
+    : t('邮件数尚未统计');
+  if (normalizedDate) title += ` · ${t('上次统计：{v}', { v: formatDate(normalizedDate) })}`;
+  const label = hasCount
+    ? t('{n} 封', { n: total.toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN') })
+    : '—';
+  return `<span class="${className}" title="${esc(title)}">${label}</span>`;
+}
+
 function renderAccountRows(accounts) {
   return accounts.map(a => `<tr>
     <td><input type="checkbox" class="acc-check" value="${a.id}" onchange="onAccountCheck(this)" ${selectedAccountIds.has(a.id) ? 'checked' : ''}></td>
     <td>
-      <div style="display:flex;align-items:center;gap:6px">
+      <div class="account-email-line">
         <a class="email-link" onclick="goToEmail(${a.id})" title="${t('查看该账号邮件')}">${esc(a.email)}</a>
-        <button class="btn btn-sm" style="padding:2px 6px;font-size:10px;opacity:0.6" onclick="copyText('${esc(a.email)}',this)" title="${t('复制邮箱')}">${t('复制')}</button>
+        ${accountInboxCountHtml(a)}
+        <button class="btn btn-sm account-copy-btn" onclick="copyText('${esc(a.email)}',this)" title="${t('复制邮箱')}" aria-label="${t('复制邮箱')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg><span class="btn-label"></span></button>
       </div>
       ${tagBadgesHtml(a.tags)}
     </td>
@@ -1530,120 +1554,178 @@ async function renderSettings(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>' + t('加载中...') + '</div>';
   const res = await api('/settings');
   const settings = res?.data || {};
+  const refreshEnabled = settings.token_refresh_enabled === '1';
+  const telegramEnabled = settings.telegram_push_enabled === '1';
+  const externalApiEnabled = Boolean(settings.external_api_key);
+  const statusChip = (label, enabled) => `<div class="settings-status-chip ${enabled ? 'is-active' : ''}">
+    <span class="settings-status-dot"></span><span>${label}</span><b>${enabled ? t('已启用') : t('未启用')}</b>
+  </div>`;
+  const icons = {
+    basic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56V21a2 2 0 01-4 0v-.09A1.7 1.7 0 009 19.37a1.7 1.7 0 00-1.88.34l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.7 1.7 0 004.63 15 1.7 1.7 0 003.09 14H3a2 2 0 010-4h.09A1.7 1.7 0 004.63 9a1.7 1.7 0 00-.34-1.88l-.06-.06a2 2 0 012.83-2.83l.06.06A1.7 1.7 0 009 4.63 1.7 1.7 0 0010 3.09V3a2 2 0 014 0v.09A1.7 1.7 0 0015 4.63a1.7 1.7 0 001.88-.34l.06-.06a2 2 0 012.83 2.83l-.06.06A1.7 1.7 0 0019.37 9 1.7 1.7 0 0020.91 10H21a2 2 0 010 4h-.09A1.7 1.7 0 0019.4 15z"/></svg>',
+    integration: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12h8"/><path d="M12 8v8"/><rect x="3" y="3" width="18" height="18" rx="4"/></svg>',
+    api: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>',
+    telegram: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
+  };
 
   el.innerHTML = `
+    <div class="settings-page">
+    <section class="settings-overview">
+      <div class="settings-overview-copy">
+        <span class="settings-eyebrow">${t('配置中心')}</span>
+        <h2>${t('让服务按你的方式运行')}</h2>
+        <p>${t('安全、自动任务与外部集成都集中在这里，修改仅在保存后生效。')}</p>
+      </div>
+      <div class="settings-status-list">
+        ${statusChip(t('Token 自动刷新'), refreshEnabled)}
+        ${statusChip(t('Telegram 推送'), telegramEnabled)}
+        ${statusChip(t('对外 API'), externalApiEnabled)}
+      </div>
+    </section>
+
     <div class="settings-grid">
-    <div class="card">
-      <h3 style="margin-bottom:20px">${t('系统设置')}</h3>
-      <div class="form-group">
-        <label class="form-label">${t('登录密码 (当前: {v})', { v: esc(settings.login_password || t('未设置')) })}</label>
-        <input class="form-input" id="sPassword" type="password" placeholder="${t('输入新密码（留空不修改）')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">${t('GPTMail API Key (当前: {v})', { v: esc(settings.gptmail_api_key || t('未设置')) })}</label>
-        <input class="form-input" id="sApiKey" placeholder="${t('输入 API Key')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">${t('站点标题')}</label>
-        <input class="form-input" id="sSiteTitle" value="${esc(settings.site_title || t('Outlook 邮件管理'))}">
-      </div>
-      <button class="btn btn-primary" onclick="saveSettings()">${t('保存设置')}</button>
-    </div>
+      <div class="settings-column">
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <span class="settings-card-icon">${icons.basic}</span>
+            <div><h3>${t('基础设置')}</h3><p>${t('管理站点名称与后台登录凭据。')}</p></div>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-group">
+              <label class="form-label">${t('站点标题')}</label>
+              <input class="form-input" id="sSiteTitle" value="${esc(settings.site_title || t('Outlook 邮件管理'))}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('登录密码')}</label>
+              <input class="form-input" id="sPassword" type="password" placeholder="${t('输入新密码（留空不修改）')}">
+              <div class="settings-field-hint">${t('当前状态：{v}', { v: esc(settings.login_password || t('未设置')) })}</div>
+            </div>
+          </div>
+          <div class="settings-actions"><button class="btn btn-primary" onclick="saveSettings()">${t('保存基础设置')}</button></div>
+        </section>
 
-    <div class="card">
-      <h3 style="margin-bottom:8px">${t('对外 API')}</h3>
-      <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
-        ${t('用 API Key 免登录拉取邮件（适合脚本自动取验证码）。详见 {link}。', { link: `<a href="https://github.com/roseforyou/cf-outlook-email/blob/main/docs/API.md" target="_blank">${t('API 文档')}</a>` })}
-      </div>
-      <div class="form-group">
-        <label class="form-label">API Key</label>
-        <div style="display:flex;gap:8px">
-          <input class="form-input" id="sExternalKey" readonly value="${esc(settings.external_api_key || '')}" placeholder="${t('未启用（点下方「生成 API Key」）')}" style="flex:1;font-family:monospace;font-size:12px">
-          <button class="btn" type="button" onclick="copyText(document.getElementById('sExternalKey').value, this)" ${settings.external_api_key ? '' : 'disabled'}>${t('复制')}</button>
-        </div>
-      </div>
-      ${settings.external_api_key ? `<div class="form-group">
-        <label class="form-label">${t('调用示例')}</label>
-        <input class="form-input" readonly value="${location.origin}/api/external/emails?email=${t('你的邮箱')}&key=${esc(settings.external_api_key)}" style="font-family:monospace;font-size:11px" onclick="this.select()">
-      </div>` : ''}
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" type="button" onclick="generateApiKey()">${settings.external_api_key ? t('重新生成') : t('生成 API Key')}</button>
-        ${settings.external_api_key ? `<button class="btn btn-danger" type="button" onclick="clearApiKey()">${t('停用')}</button>` : ''}
-      </div>
-    </div>
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <span class="settings-card-icon">${icons.integration}</span>
+            <div><h3>${t('GPTMail 集成')}</h3><p>${t('用于生成和管理临时邮箱。密钥仅会脱敏显示。')}</p></div>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-group">
+              <label class="form-label">GPTMail API Key</label>
+              <input class="form-input settings-mono" id="sApiKey" placeholder="${t('输入 API Key')}">
+              <div class="settings-field-hint">${t('当前状态：{v}', { v: esc(settings.gptmail_api_key || t('未设置')) })}</div>
+            </div>
+          </div>
+          <div class="settings-actions"><button class="btn btn-primary" onclick="saveSettings()">${t('保存 API Key')}</button></div>
+        </section>
 
-    <div class="card">
-      <h3 style="margin-bottom:8px">${t('定时刷新 Token')}</h3>
-      <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
-        ${t('定时自动刷新账号 Token，让长期不用的号也不过期。Cloudflare 每 6 小时唤醒一次，实际是否执行由下面的「间隔」决定。')}
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <span class="settings-card-icon">${icons.api}</span>
+            <div><h3>${t('对外 API')}</h3><p>${t('用 API Key 免登录拉取邮件（适合脚本自动取验证码）。详见 {link}。', { link: `<a href="https://github.com/roseforyou/cf-outlook-email/blob/main/docs/API.md" target="_blank" rel="noopener">${t('API 文档')}</a>` })}</p></div>
+            <span class="settings-card-state ${externalApiEnabled ? 'is-active' : ''}">${externalApiEnabled ? t('已启用') : t('未启用')}</span>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <div class="settings-input-action">
+                <input class="form-input settings-mono" id="sExternalKey" readonly value="${esc(settings.external_api_key || '')}" placeholder="${t('未启用（点下方「生成 API Key」）')}">
+                <button class="btn" type="button" onclick="copyText(document.getElementById('sExternalKey').value, this)" ${externalApiEnabled ? '' : 'disabled'}>${t('复制')}</button>
+              </div>
+            </div>
+            ${externalApiEnabled ? `<div class="form-group">
+              <label class="form-label">${t('调用示例')}</label>
+              <input class="form-input settings-mono settings-example" readonly value="${location.origin}/api/external/emails?email=${t('你的邮箱')}&key=${esc(settings.external_api_key)}" onclick="this.select()">
+            </div>` : ''}
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" type="button" onclick="generateApiKey()">${externalApiEnabled ? t('重新生成') : t('生成 API Key')}</button>
+            ${externalApiEnabled ? `<button class="btn btn-danger" type="button" onclick="clearApiKey()">${t('停用')}</button>` : ''}
+          </div>
+        </section>
       </div>
-      <div class="form-group" style="display:flex;align-items:center;gap:10px">
-        <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="sRefreshEnabled" ${settings.token_refresh_enabled === '1' ? 'checked' : ''}> ${t('启用定时刷新')}
-        </label>
-      </div>
-      <div style="display:flex;gap:12px">
-        <div class="form-group" style="flex:1">
-          <label class="form-label">${t('间隔（小时）')}</label>
-          <input class="form-input" id="sRefreshInterval" type="number" min="6" value="${esc(settings.token_refresh_interval_hours || '24')}">
-        </div>
-        <div class="form-group" style="flex:1">
-          <label class="form-label">${t('每批数量（≤40）')}</label>
-          <input class="form-input" id="sRefreshBatch" type="number" min="1" max="40" value="${esc(settings.token_refresh_batch || '20')}">
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">${t('上次执行：{v}', { v: esc(tServer(settings.token_refresh_last_result || '尚未执行')) })}</div>
-      <div style="background:var(--warning-bg);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--text-secondary);line-height:1.8">
-        <b style="color:var(--warning)">${t('⚠️ 频率风险（请勿设太频繁）')}</b><br>
-        · ${t('<b>微软风控（最重要）</b>：refresh_token 每次刷新都会被微软轮换，高频自动刷新可能触发 Graph 限流（429），对「领来的」账号还可能被微软判定异常活动而<b>锁号</b>。Token 只要每隔几天被用到就不会过期，<b>没必要高频刷，建议间隔 ≥ 12 小时，默认 24 小时足够</b>。')}<br>
-        · ${t('<b>子请求限制</b>：免费层单次最多 50 个子请求，每个账号刷新占 1 个，故「每批」上限 40，超出的账号下一轮再刷。')}<br>
-        · ${t('<b>账号多时</b>：账号数 > 每批数量，会分多轮轮换刷新（按最久未刷新优先），不会一次刷完。')}<br>
-        · ${t('<b>请求配额</b>：免费层 10 万次/天，定时任务本身消耗极小，正常用不会触顶。')}
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" type="button" onclick="saveRefreshSettings()">${t('保存')}</button>
-        <button class="btn" type="button" onclick="refreshTokensNow(this)">${t('立即刷新一批')}</button>
-      </div>
-    </div>
 
-    <div class="card">
-      <h3 style="margin-bottom:8px">${t('Telegram 推送新邮件')}</h3>
-      <div style="font-size:12.5px;color:var(--text-dim);line-height:1.7;margin-bottom:16px">
-        ${t('新邮件到达时推送到 Telegram（适合实时收验证码）。需先 {bot} 拿到 Bot Token，再给机器人发条消息后用 {userinfo} 获取 Chat ID。Cloudflare 每 5 分钟唤醒一次，推送延迟取决于邮件到达时刻与下一次唤醒的间隔，平均约 2~3 分钟、最长约 5 分钟；下面的「间隔」默认 1（每次唤醒都推，即最快），设得比 5 大则进一步拉长。', {
-          bot: `<a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank">${t('用 @BotFather 创建机器人')}</a>`,
-          userinfo: '<a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>',
-        })}
-      </div>
-      <div class="form-group" style="display:flex;align-items:center;gap:10px">
-        <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="sTgEnabled" ${settings.telegram_push_enabled === '1' ? 'checked' : ''}> ${t('启用推送')}
-        </label>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Bot Token</label>
-        <input class="form-input" id="sTgToken" value="${esc(settings.telegram_bot_token || '')}" placeholder="123456:ABC-DEF..." style="font-family:monospace;font-size:12px">
-      </div>
-      <div style="display:flex;gap:12px">
-        <div class="form-group" style="flex:1">
-          <label class="form-label">Chat ID</label>
-          <input class="form-input" id="sTgChatId" value="${esc(settings.telegram_chat_id || '')}" placeholder="${t('例如 123456789')}">
-        </div>
-        <div class="form-group" style="flex:1">
-          <label class="form-label">${t('间隔（分钟）')}</label>
-          <input class="form-input" id="sTgInterval" type="number" min="1" value="${esc(settings.telegram_push_interval_minutes || '1')}">
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">${t('上次执行：{v}', { v: esc(tServer(settings.telegram_push_last_result || '尚未执行')) })}</div>
-      <div style="background:var(--warning-bg);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--text-secondary);line-height:1.8">
-        <b style="color:var(--warning)">${t('⚠️ 说明')}</b><br>
-        · ${t('通过<b>轮询</b>实现（非微软实时推送），延迟取决于邮件到达与下次唤醒的间隔，<b>平均约 2~3 分钟、最长约 5 分钟</b>；间隔设得比 5 大则进一步拉长。')}<br>
-        · ${t('受子请求限制，每轮最多扫描 8 个账号、每账号最多推 3 条；账号多时按最久未扫优先轮换。')}<br>
-        · ${t('首次为每个账号只记录水位、<b>不补推历史邮件</b>，之后只推新到达的邮件。')}
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" type="button" onclick="saveTelegramSettings()">${t('保存')}</button>
-        <button class="btn" type="button" onclick="testTelegram(this)">${t('发送测试消息')}</button>
-        <button class="btn" type="button" onclick="pushNow(this)">${t('立即推送一轮')}</button>
+      <div class="settings-column">
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <span class="settings-card-icon">${icons.refresh}</span>
+            <div><h3>${t('Token 自动刷新')}</h3><p>${t('服务定期检查账号，实际执行由下面的间隔设置控制。')}</p></div>
+            <label class="settings-switch" title="${t('启用定时刷新')}">
+              <input type="checkbox" id="sRefreshEnabled" ${refreshEnabled ? 'checked' : ''}>
+              <span class="settings-switch-track"></span><span>${t('启用')}</span>
+            </label>
+          </div>
+          <div class="settings-card-body">
+            <div class="settings-form-row">
+              <div class="form-group">
+                <label class="form-label">${t('间隔（小时）')}</label>
+                <input class="form-input" id="sRefreshInterval" type="number" min="6" value="${esc(settings.token_refresh_interval_hours || '24')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">${t('每批数量（≤40）')}</label>
+                <input class="form-input" id="sRefreshBatch" type="number" min="1" max="40" value="${esc(settings.token_refresh_batch || '20')}">
+              </div>
+            </div>
+            <div class="settings-last-run"><span>${t('上次执行')}</span><b>${esc(tServer(settings.token_refresh_last_result || '尚未执行'))}</b></div>
+            <details class="settings-notice">
+              <summary>${t('频率与账号安全说明')}</summary>
+              <div>
+                <p>${t('<b>微软风控（最重要）</b>：refresh_token 每次刷新都会被微软轮换，高频自动刷新可能触发 Graph 限流（429），对「领来的」账号还可能被微软判定异常活动而<b>锁号</b>。Token 只要每隔几天被用到就不会过期，<b>没必要高频刷，建议间隔 ≥ 12 小时，默认 24 小时足够</b>。')}</p>
+                <p>${t('<b>单批限制</b>：为兼容不同运行环境，每批最多刷新 40 个账号，超出的账号会在下一轮处理。')}</p>
+                <p>${t('<b>账号多时</b>：账号数 > 每批数量，会分多轮轮换刷新（按最久未刷新优先），不会一次刷完。')}</p>
+              </div>
+            </details>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" type="button" onclick="saveRefreshSettings()">${t('保存')}</button>
+            <button class="btn" type="button" onclick="refreshTokensNow(this)">${t('立即刷新一批')}</button>
+          </div>
+        </section>
+
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <span class="settings-card-icon">${icons.telegram}</span>
+            <div><h3>${t('Telegram 推送')}</h3><p>${t('新邮件到达后推送通知，适合及时接收验证码。')}</p></div>
+            <label class="settings-switch" title="${t('启用推送')}">
+              <input type="checkbox" id="sTgEnabled" ${telegramEnabled ? 'checked' : ''}>
+              <span class="settings-switch-track"></span><span>${t('启用')}</span>
+            </label>
+          </div>
+          <div class="settings-card-body">
+            <div class="settings-help">${t('先通过 {bot} 获取 Bot Token，给机器人发送一条消息后，再通过 {userinfo} 查询 Chat ID。', {
+              bot: `<a href="https://core.telegram.org/bots#how-do-i-create-a-bot" target="_blank" rel="noopener">${t('@BotFather 创建机器人')}</a>`,
+              userinfo: '<a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>',
+            })}</div>
+            <div class="form-group">
+              <label class="form-label">Bot Token</label>
+              <input class="form-input settings-mono" id="sTgToken" value="${esc(settings.telegram_bot_token || '')}" placeholder="123456:ABC-DEF...">
+            </div>
+            <div class="settings-form-row">
+              <div class="form-group">
+                <label class="form-label">Chat ID</label>
+                <input class="form-input" id="sTgChatId" value="${esc(settings.telegram_chat_id || '')}" placeholder="${t('例如 123456789')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">${t('间隔（分钟）')}</label>
+                <input class="form-input" id="sTgInterval" type="number" min="1" value="${esc(settings.telegram_push_interval_minutes || '1')}">
+              </div>
+            </div>
+            <div class="settings-last-run"><span>${t('上次执行')}</span><b>${esc(tServer(settings.telegram_push_last_result || '尚未执行'))}</b></div>
+            <details class="settings-notice">
+              <summary>${t('轮询与推送说明')}</summary>
+              <div>
+                <p>${t('通过<b>轮询</b>实现（非微软实时推送），实际延迟取决于服务检查频率与间隔设置。')}</p>
+                <p>${t('每轮最多扫描 8 个账号、每账号最多推送 3 条；账号多时按最久未扫描优先轮换。')}</p>
+                <p>${t('首次为每个账号只记录水位、<b>不补推历史邮件</b>，之后只推新到达的邮件。')}</p>
+              </div>
+            </details>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" type="button" onclick="saveTelegramSettings()">${t('保存')}</button>
+            <button class="btn" type="button" onclick="testTelegram(this)">${t('发送测试消息')}</button>
+            <button class="btn" type="button" onclick="pushNow(this)">${t('立即推送一轮')}</button>
+          </div>
+        </section>
       </div>
     </div>
     </div>

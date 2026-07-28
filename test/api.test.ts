@@ -235,3 +235,37 @@ describe('email body viewer HTML document detection', () => {
     expect(isFullHtmlDocument('&lt;html lang="en"&gt;')).toBe(false);
   });
 });
+
+describe('frontend account count and settings layout', () => {
+  it('renders the cached inbox count beside each account without another API request', async () => {
+    const appSource = await readFile(new URL('../public/assets/app.js', import.meta.url), 'utf8');
+    const helperSource = appSource.match(/function accountInboxCountHtml\(account\) \{[\s\S]*?\n\}/)?.[0];
+
+    expect(helperSource).toBeTruthy();
+    expect(helperSource).toContain('account?.inbox?.total');
+    expect(helperSource).toContain('account?.inbox?.checked_at');
+    expect(helperSource).not.toContain('api(');
+    expect(appSource).toContain('${accountInboxCountHtml(a)}');
+  });
+
+  it('keeps every settings control and action in the redesigned layout', async () => {
+    const appSource = await readFile(new URL('../public/assets/app.js', import.meta.url), 'utf8');
+
+    for (const id of [
+      'sPassword', 'sApiKey', 'sSiteTitle', 'sExternalKey',
+      'sRefreshEnabled', 'sRefreshInterval', 'sRefreshBatch',
+      'sTgEnabled', 'sTgToken', 'sTgChatId', 'sTgInterval',
+    ]) {
+      expect(appSource).toContain(`id="${id}"`);
+    }
+    for (const handler of [
+      'saveSettings()', 'generateApiKey()', 'clearApiKey()',
+      'saveRefreshSettings()', 'refreshTokensNow(this)',
+      'saveTelegramSettings()', 'testTelegram(this)', 'pushNow(this)',
+    ]) {
+      expect(appSource).toContain(`onclick="${handler}"`);
+    }
+    expect(appSource).toContain('class="settings-overview"');
+    expect(appSource).toContain('class="settings-grid"');
+  });
+});
