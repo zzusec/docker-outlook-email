@@ -461,6 +461,7 @@ async function renderAccounts(el) {
   <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
     <button class="btn btn-sm" onclick="refreshSelectedTokens()" title="${t('在后台刷新选中账号的 Token')}">${t('刷新 Token')}</button>
+    <button class="btn btn-sm" onclick="countSelectedInboxes()" title="${t('在后台统计选中账号的邮件数')}">${t('统计邮件数')}</button>
     <button class="btn btn-sm" onclick="detectSelectedAccounts()" title="${t('在后台检测选中账号（含邮件数统计）')}">${t('检测选中')}</button>
     <button class="btn btn-sm" onclick="batchAction('move')">${t('移动分组')}</button>
     <button class="btn btn-sm" onclick="batchAction('enable')">${t('批量启用')}</button>
@@ -649,6 +650,13 @@ async function detectSelectedAccounts() {
   await startBackgroundJob({ kind: 'detect', ids, label: t('选中 {n} 个', { n: ids.length }) });
 }
 
+async function countSelectedInboxes() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast(t('请先选择账号'), 'error'); return; }
+  if (!confirm(t('将在后台统计选中的 {n} 个邮箱的邮件数，关闭页面也会继续，确认？', { n: ids.length }))) return;
+  await startBackgroundJob({ kind: 'count', ids, label: t('选中 {n} 个', { n: ids.length }) });
+}
+
 async function startBackgroundJob(payload) {
   const res = await api('/accounts/detect/start', { method: 'POST', body: JSON.stringify(payload) });
   if (!res?.success) { toast(res?.error?.message || t('启动失败'), 'error'); return; }
@@ -696,19 +704,21 @@ function renderDetectBanner(job) {
 
   const active = job.state === 'running' || job.state === 'stopping';
   const pct = job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
-  const isRefresh = job.kind === 'refresh';
+  const kindTitle = { refresh: t('刷新 Token'), count: t('统计邮件数'), detect: t('检测') }[job.kind] || t('检测');
+  const running = { refresh: t('刷新中'), count: t('统计中'), detect: t('检测中') }[job.kind] || t('检测中');
+  const finished = { refresh: t('刷新完成'), count: t('统计完成'), detect: t('检测完成') }[job.kind] || t('检测完成');
   const stateLabel = {
-    running: isRefresh ? t('刷新中') : t('检测中'),
+    running,
     stopping: t('正在停止...'),
     stopped: t('已停止'),
-    done: isRefresh ? t('刷新完成') : t('检测完成'),
+    done: finished,
   }[job.state] || job.state;
   host.style.display = '';
   host.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px">
-      <b>${isRefresh ? t('刷新 Token') : t('检测')} · ${esc(job.scope_label || t('全部分组'))}</b>
+      <b>${kindTitle} · ${esc(job.scope_label || t('全部分组'))}</b>
       <span style="color:var(--text-muted)">${stateLabel} ${job.processed}/${job.total}（${pct}%）</span>
-      <span style="color:var(--success)">${isRefresh ? t('成功 {n}', { n: job.connected }) : t('正常 {n}', { n: job.connected })}</span>
+      <span style="color:var(--success)">${job.kind === 'detect' ? t('正常 {n}', { n: job.connected }) : t('成功 {n}', { n: job.connected })}</span>
       <span style="color:var(--danger)">${t('失败 {n}', { n: job.failed })}</span>
       <span style="color:var(--text-muted)">${t('已删除 {n}', { n: job.deleted })}</span>
       ${job.last_email ? `<span style="color:var(--text-dim)">${esc(job.last_email)}</span>` : ''}
@@ -744,11 +754,18 @@ async function refreshPageInboxCounts(btn) {
   const start = (accPage - 1) * accPageSize;
   const pageAccounts = accountsView.slice(start, start + accPageSize);
   if (!pageAccounts.length) return;
+  // Big pages take minutes: hand them to the background job so the browser is
+  // free to navigate away, and keep the inline path for quick pages only.
+  if (pageAccounts.length > AUTO_INBOX_HYDRATE_LIMIT) {
+    await startBackgroundJob({
+      kind: 'count',
+      ids: pageAccounts.map(a => a.id),
+      label: t('本页 {n} 个', { n: pageAccounts.length }),
+    });
+    return;
+  }
   const label = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = t('统计中...'); }
-  if (pageAccounts.length > AUTO_INBOX_HYDRATE_LIMIT) {
-    toast(t('开始统计本页 {n} 个邮箱，期间请留在本页', { n: pageAccounts.length }), 'success', 5000);
-  }
   await hydrateInboxCounts(pageAccounts, { force: true });
   if (btn) { btn.disabled = false; btn.textContent = label; }
 }
@@ -2148,7 +2165,7 @@ async function pushNow(btn) {
   if (btn) { btn.disabled = true; btn.textContent = t('推送中...'); }
   const res = await api('/settings/push-now', { method: 'POST' });
   if (btn) { btn.disabled = false; btn.textContent = t('立即推送一轮'); }
-  if (res?.success) { toast(res.message || t('已执行'), 'success', 5000); navigate('settings'); }
+  if (res?.success) toast(res.message || t('已在后台开始推送，稍后刷新本页查看结果'), 'success', 6000);
   else toast(res?.error?.message || t('推送失败'), 'error');
 }
 
@@ -2170,7 +2187,9 @@ async function refreshTokensNow(btn) {
   if (btn) { btn.disabled = true; btn.textContent = t('刷新中...'); }
   const res = await api('/settings/refresh-now', { method: 'POST' });
   if (btn) { btn.disabled = false; btn.textContent = t('立即刷新一批'); }
-  if (res?.success) { toast(res.message || t('已刷新'), 'success', 5000); navigate('settings'); }
+  // The job runs detached now: re-rendering immediately would still show the
+  // previous run's summary, so tell the user to reload when it finishes.
+  if (res?.success) toast(res.message || t('已在后台开始刷新，稍后刷新本页查看结果'), 'success', 6000);
   else toast(res?.error?.message || t('刷新失败'), 'error');
 }
 

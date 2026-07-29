@@ -53,16 +53,29 @@ settings.delete('/external-key', async (c) => {
   return ok(null, '已停用对外 API');
 });
 
-// POST /api/settings/refresh-now - manually refresh a batch of tokens immediately
+// Run a cron job detached from the response. A batch of 40 accounts takes minutes,
+// which is longer than most proxies will hold a request open; the summary is
+// persisted to settings and shown on the next page load.
+function runDetached(c: { env: Env; executionCtx?: ExecutionContext }, work: Promise<unknown>) {
+  const guarded = work.catch((error) => console.error('Background job failed:', error));
+  try {
+    // Workers kills stray promises once the response returns; Node does not.
+    c.executionCtx?.waitUntil(guarded);
+  } catch {
+    // No ExecutionContext bound (Node server, tests) — the promise runs on its own
+  }
+}
+
+// POST /api/settings/refresh-now - manually refresh a batch of tokens in the background
 settings.post('/refresh-now', async (c) => {
-  const summary = await runTokenRefresh(c.env, { force: true });
-  return ok({ summary }, summary);
+  runDetached(c, runTokenRefresh(c.env, { force: true }));
+  return ok(null, '已在后台开始刷新，稍后刷新本页查看结果');
 });
 
-// POST /api/settings/push-now - manually run the Telegram email push immediately
+// POST /api/settings/push-now - run the Telegram email push in the background
 settings.post('/push-now', async (c) => {
-  const summary = await runEmailPush(c.env, { force: true });
-  return ok({ summary }, summary);
+  runDetached(c, runEmailPush(c.env, { force: true }));
+  return ok(null, '已在后台开始推送，稍后刷新本页查看结果');
 });
 
 // POST /api/settings/telegram-test - send a test message with the saved bot/chat config

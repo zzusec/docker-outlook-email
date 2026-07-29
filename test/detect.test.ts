@@ -185,6 +185,36 @@ describe('background refresh job (selected accounts)', () => {
   });
 });
 
+describe('background count job', () => {
+  it('fills in inbox totals without spending a mail-list call', async () => {
+    const db = createDatabase();
+    await seedAccounts(db, [{ email: 'a@x.c', group: 1 }, { email: 'b@x.c', group: 1 }]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/token')) {
+        return new Response(JSON.stringify({
+          access_token: 'at',
+          scope: 'https://graph.microsoft.com/Mail.ReadWrite offline_access',
+        }));
+      }
+      return new Response(JSON.stringify({ totalItemCount: 42 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { job } = await startDetectJob(db, { kind: 'count', group_id: 1 });
+    expect(job.kind).toBe('count');
+    await advanceDetectJob({ DB: db } as any);
+
+    const finished = (await getLatestDetectJob(db)) as DetectJobRow;
+    expect(finished.connected).toBe(2);
+    const rows = await query<{ inbox_total: number }>(db, 'SELECT inbox_total FROM accounts ORDER BY id');
+    expect(rows.map((row) => row.inbox_total)).toEqual([42, 42]);
+    // 2 accounts x (token + folder) — no /messages probe like a detect job does
+    expect(fetchMock.mock.calls.length).toBe(4);
+    expect(fetchMock.mock.calls.every((call) => !String(call[0]).includes('/messages'))).toBe(true);
+  });
+});
+
 describe('detect routes', () => {
   it('routes /detect/* without colliding with /:id handlers', async () => {
     const db = createDatabase();

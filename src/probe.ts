@@ -219,3 +219,65 @@ export async function refreshAccountToken(
   ]);
   return { ...base, refreshed: true, rotated, deleted: false };
 }
+
+export interface InboxCountOutcome {
+  id: number;
+  email: string;
+  total: number | null;
+  checked_at: string | null;
+  deleted: boolean;
+  error?: GraphError;
+}
+
+// Token + Inbox count only — the cheapest way to fill in a message count. Skips
+// the mail-list probe that probeAccount() does, so it costs one call less per
+// account. Shares the dead-mailbox handling with the other job kinds.
+export async function countAccountInbox(
+  db: D1Database,
+  account: AccountRow,
+  deleteInvalid: boolean
+): Promise<InboxCountOutcome> {
+  const base = { id: account.id, email: account.email };
+  const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
+
+  if (!tokenResult.token) {
+    if (deleteInvalid && isPermanentTokenFailure(tokenResult.error)) {
+      await batchRun(db, [
+        { sql: 'DELETE FROM account_tags WHERE account_id = ?', params: [account.id] },
+        { sql: 'DELETE FROM accounts WHERE id = ?', params: [account.id] },
+      ]);
+      return { ...base, total: null, checked_at: null, deleted: true, error: tokenResult.error };
+    }
+    await batchRun(db, [{
+      sql: "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      params: [account.id],
+    }]);
+    return { ...base, total: null, checked_at: null, deleted: false, error: tokenResult.error };
+  }
+
+  const rotated =
+    tokenResult.newRefreshToken && tokenResult.newRefreshToken !== account.refresh_token
+      ? tokenResult.newRefreshToken
+      : null;
+  const countResult = await getInboxTotal(tokenResult.token);
+  const checkedAt = new Date().toISOString();
+
+  const assignments = ["status = 'active'", 'updated_at = CURRENT_TIMESTAMP'];
+  const params: unknown[] = [];
+  if (rotated) {
+    assignments.unshift('refresh_token = ?');
+    params.push(rotated);
+  }
+  if (countResult.total !== undefined) {
+    assignments.push('inbox_total = ?', 'inbox_count_updated_at = ?');
+    params.push(countResult.total, checkedAt);
+  }
+  await batchRun(db, [{
+    sql: `UPDATE accounts SET ${assignments.join(', ')} WHERE id = ?`,
+    params: [...params, account.id],
+  }]);
+
+  return countResult.total === undefined
+    ? { ...base, total: null, checked_at: null, deleted: false, error: countResult.error }
+    : { ...base, total: countResult.total, checked_at: checkedAt, deleted: false };
+}

@@ -442,7 +442,7 @@ accounts.post('/detect/start', async (c) => {
     return Number.isInteger(n) && (n as number) > 0 ? (n as number) : null;
   };
   const status = ['active', 'error', 'disabled'].includes(String(body.status)) ? String(body.status) : null;
-  const kind = body.kind === 'refresh' ? 'refresh' : 'detect';
+  const kind = body.kind === 'refresh' || body.kind === 'count' ? body.kind : 'detect';
   const ids = Array.isArray(body.ids) ? body.ids.filter((id) => Number.isInteger(id) && id > 0) : [];
   if (ids.length > MAX_SELECTED_JOB_ACCOUNTS) {
     return badRequest(`单个任务最多 ${MAX_SELECTED_JOB_ACCOUNTS} 个账号，请分批操作`);
@@ -456,8 +456,9 @@ accounts.post('/detect/start', async (c) => {
     tag_id: toId(body.tag_id),
     label: typeof body.label === 'string' ? body.label.slice(0, 100) : '',
   });
-  const noun = kind === 'refresh' ? '刷新' : '检测';
-  if (!created) return ok(job, `已有${job.kind === 'refresh' ? '刷新' : '检测'}任务在运行，返回当前任务`);
+  const nouns: Record<string, string> = { refresh: '刷新', count: '统计', detect: '检测' };
+  const noun = nouns[kind];
+  if (!created) return ok(job, `已有${nouns[job.kind] ?? '检测'}任务在运行，返回当前任务`);
   if (!job.total) return ok(job, '该范围内没有账号');
 
   // Kick the first batch immediately so the UI shows progress right away; the

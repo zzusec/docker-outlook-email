@@ -8,6 +8,7 @@ import {
   probeAccount,
   persistProbeResults,
   refreshAccountToken,
+  countAccountInbox,
   mapWithConcurrency,
   PROBE_CONCURRENCY,
 } from './probe';
@@ -17,8 +18,9 @@ import {
 export const DETECT_BATCH = 10;
 
 // detect  — full probe: token + mail access + Inbox count
-// refresh — token refresh only, over a hand-picked selection
-export type DetectJobKind = 'detect' | 'refresh';
+// refresh — token refresh only (cheapest, keeps refresh_tokens alive)
+// count   — token + Inbox count only, for filling in message counts in bulk
+export type DetectJobKind = 'detect' | 'refresh' | 'count';
 
 export interface DetectJobRow {
   id: number;
@@ -103,7 +105,8 @@ export async function startDetectJob(
   const existing = await getActiveDetectJob(db);
   if (existing) return { job: existing, created: false };
 
-  const kind: DetectJobKind = scope.kind === 'refresh' ? 'refresh' : 'detect';
+  const kind: DetectJobKind =
+    scope.kind === 'refresh' || scope.kind === 'count' ? scope.kind : 'detect';
   const ids = [...new Set((scope.ids ?? []).filter((id) => Number.isInteger(id) && id > 0))];
   const groupId = !ids.length && scope.group_id && scope.group_id > 0 ? scope.group_id : null;
   const tagId = !ids.length && scope.tag_id && scope.tag_id > 0 ? scope.tag_id : null;
@@ -212,6 +215,13 @@ export async function advanceDetectJob(env: Env): Promise<string> {
       refreshAccountToken(db, account, deleteInvalid)
     );
     succeeded = outcomes.filter((outcome) => outcome.refreshed).length;
+    deletedCount = outcomes.filter((outcome) => outcome.deleted).length;
+    lastError = outcomes.find((outcome) => outcome.error)?.error;
+  } else if (job.kind === 'count') {
+    const outcomes = await mapWithConcurrency(accounts, PROBE_CONCURRENCY, (account) =>
+      countAccountInbox(db, account, deleteInvalid)
+    );
+    succeeded = outcomes.filter((outcome) => outcome.total !== null).length;
     deletedCount = outcomes.filter((outcome) => outcome.deleted).length;
     lastError = outcomes.find((outcome) => outcome.error)?.error;
   } else {
