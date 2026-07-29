@@ -488,7 +488,7 @@ async function renderAccounts(el) {
   <div class="page-footer">
     <span style="font-size:12px;color:var(--text-dim)">${t('每页')}</span>
     <select class="form-select" style="width:auto" onchange="accSetPageSize(this.value)">
-      ${[20, 50, 100].map(n => `<option value="${n}" ${n === accPageSize ? 'selected' : ''}>${n}</option>`).join('')}
+      ${[20, 50, 100, 500, 1000].map(n => `<option value="${n}" ${n === accPageSize ? 'selected' : ''}>${n}</option>`).join('')}
     </select>
     <span style="font-size:12px;color:var(--text-dim)">${t('条')}</span>
     <button class="btn btn-sm" onclick="refreshPageInboxCounts(this)" title="${t('重新统计本页邮箱的收件箱邮件数')}">${t('刷新本页邮件数')}</button>
@@ -561,13 +561,20 @@ var INBOX_COUNT_CHUNK = 20;
 // cannot be counted is not retried on every page turn.
 var inboxCountAttempted = new Set();
 var inboxHydrateRun = 0;
+// Large page sizes (500 / 1000) would otherwise fire dozens of upstream batches
+// the moment the page renders. Auto-fill stops here; the rest waits for the
+// explicit "刷新本页邮件数" button.
+var AUTO_INBOX_HYDRATE_LIMIT = 100;
 
 async function hydrateInboxCounts(pageAccounts, opts) {
   const force = Boolean(opts && opts.force);
   const run = ++inboxHydrateRun;
-  const pending = (pageAccounts || []).filter(a =>
+  let pending = (pageAccounts || []).filter(a =>
     a && (force || (a.inbox?.total === null || a.inbox?.total === undefined) && !inboxCountAttempted.has(a.id))
   );
+  if (!force && pending.length > AUTO_INBOX_HYDRATE_LIMIT) {
+    pending = pending.slice(0, AUTO_INBOX_HYDRATE_LIMIT);
+  }
   if (!pending.length) return;
 
   if (!force) {
@@ -739,6 +746,9 @@ async function refreshPageInboxCounts(btn) {
   if (!pageAccounts.length) return;
   const label = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = t('统计中...'); }
+  if (pageAccounts.length > AUTO_INBOX_HYDRATE_LIMIT) {
+    toast(t('开始统计本页 {n} 个邮箱，期间请留在本页', { n: pageAccounts.length }), 'success', 5000);
+  }
   await hydrateInboxCounts(pageAccounts, { force: true });
   if (btn) { btn.disabled = false; btn.textContent = label; }
 }

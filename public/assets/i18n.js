@@ -146,6 +146,7 @@ var I18N_EN = {
   '刷新本页邮件数': 'Recount this page',
   '重新统计本页邮箱的收件箱邮件数': 'Re-measure the Inbox message count for accounts on this page',
   '统计中...': 'Counting...',
+  '开始统计本页 {n} 个邮箱，期间请留在本页': 'Counting {n} mailboxes on this page - stay on this page while it runs',
   '已自动删除 {n} 个失效邮箱': '{n} dead mailboxes were removed automatically',
   '测试': 'Test',
   '测试中...': 'Testing...',
