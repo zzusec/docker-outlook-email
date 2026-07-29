@@ -3,12 +3,21 @@ import type { Env, AccountRow } from '../types';
 import { query, first, run, batchRun, chunk, D1_MAX_BOUND_PARAMS } from '../db';
 import { ok, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
-import { fetchEmails, getMailAccessToken, getInboxTotal, type GraphError } from '../graph';
+import {
+  fetchEmails,
+  getMailAccessToken,
+  getInboxTotal,
+  isPermanentTokenFailure,
+  type GraphError,
+} from '../graph';
+import { getSetting } from '../cron';
 
 const accounts = new Hono<{ Bindings: Env }>();
 
 const MAX_CONNECTION_TESTS_PER_REQUEST = 10;
 const CONNECTION_TEST_CONCURRENCY = 4;
+// One page of the account list; each account costs a token call plus a folder call.
+const MAX_INBOX_COUNTS_PER_REQUEST = 20;
 
 type ProbeStage = 'token' | 'mail' | 'not_found';
 
@@ -124,11 +133,28 @@ function probeUpdateStatement(acc: AccountRow, result: AccountProbeResult) {
   };
 }
 
+// Persist a probe round. Accounts whose refresh token failed permanently are
+// deleted (when enabled) instead of being parked in "error" forever; the ids of
+// the removed accounts are returned so the caller can report them.
 async function persistProbeResults(
   db: D1Database,
-  probes: Array<{ account: AccountRow; result: AccountProbeResult }>
-) {
-  await batchRun(db, probes.map(({ account, result }) => probeUpdateStatement(account, result)));
+  probes: Array<{ account: AccountRow; result: AccountProbeResult }>,
+  deleteInvalid: boolean
+): Promise<number[]> {
+  const deletedIds = probes
+    .filter(({ result }) => deleteInvalid && result.stage === 'token' && isPermanentTokenFailure(result.error))
+    .map(({ account }) => account.id);
+  const dead = new Set(deletedIds);
+
+  const statements = probes
+    .filter(({ account }) => !dead.has(account.id))
+    .map(({ account, result }) => probeUpdateStatement(account, result));
+  for (const id of deletedIds) {
+    statements.push({ sql: 'DELETE FROM account_tags WHERE account_id = ?', params: [id] });
+    statements.push({ sql: 'DELETE FROM accounts WHERE id = ?', params: [id] });
+  }
+  await batchRun(db, statements);
+  return deletedIds;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -375,7 +401,15 @@ accounts.post('/batch', async (c) => {
       ids
     );
     const byId = new Map(found.map((account) => [account.id, account]));
-    const results: Array<{ id: number; email: string; refreshed: boolean; rotated?: boolean; error?: GraphError }> = [];
+    const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
+    const results: Array<{
+      id: number;
+      email: string;
+      refreshed: boolean;
+      rotated?: boolean;
+      deleted?: boolean;
+      error?: GraphError;
+    }> = [];
 
     for (const id of ids) {
       const account = byId.get(id);
@@ -385,6 +419,14 @@ accounts.post('/batch', async (c) => {
       }
       const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
       if (!tokenResult.token) {
+        // Permanently dead refresh token: drop the account instead of parking it
+        // in "error" forever (opt out via the token_refresh_delete_invalid setting).
+        if (deleteInvalid && isPermanentTokenFailure(tokenResult.error)) {
+          await run(c.env.DB, 'DELETE FROM account_tags WHERE account_id = ?', [id]);
+          await run(c.env.DB, 'DELETE FROM accounts WHERE id = ?', [id]);
+          results.push({ id, email: account.email, refreshed: false, deleted: true, error: tokenResult.error });
+          continue;
+        }
         await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', id]);
         results.push({ id, email: account.email, refreshed: false, error: tokenResult.error });
         continue;
@@ -399,8 +441,12 @@ accounts.post('/batch', async (c) => {
     }
 
     const refreshed = results.filter((result) => result.refreshed).length;
+    const removed = results.filter((result) => result.deleted).length;
     const failed = results.length - refreshed;
-    return ok({ requested: ids.length, refreshed, failed, results }, `Token 刷新完成：成功 ${refreshed}，失败 ${failed}`);
+    return ok(
+      { requested: ids.length, refreshed, failed, deleted: removed, results },
+      `Token 刷新完成：成功 ${refreshed}，失败 ${failed}${removed ? `，删除失效 ${removed}` : ''}`
+    );
   }
 
   if (body.action === 'update_tokens') {
@@ -468,7 +514,9 @@ accounts.post('/batch', async (c) => {
       CONNECTION_TEST_CONCURRENCY,
       async (account) => ({ account, result: await probeAccount(account) })
     );
-    await persistProbeResults(c.env.DB, probes);
+    const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
+    const deletedIds = await persistProbeResults(c.env.DB, probes, deleteInvalid);
+    const deletedSet = new Set(deletedIds);
 
     const byId = new Map(probes.map((probe) => [probe.account.id, probe.result]));
     const results = ids.map((id) => byId.get(id) ?? {
@@ -490,8 +538,12 @@ accounts.post('/batch', async (c) => {
       connected,
       failed,
       missing,
-      results: results.map(publicProbeResult),
-    }, `测试完成：成功 ${connected}，失败 ${failed}${missing ? `，不存在 ${missing}` : ''}`);
+      deleted: deletedIds.length,
+      results: results.map((result) => ({
+        ...publicProbeResult(result),
+        deleted: deletedSet.has(result.id),
+      })),
+    }, `测试完成：成功 ${connected}，失败 ${failed}${missing ? `，不存在 ${missing}` : ''}${deletedIds.length ? `，删除失效 ${deletedIds.length}` : ''}`);
   }
 
   if (body.action === 'delete') {
@@ -540,6 +592,108 @@ accounts.post('/batch', async (c) => {
   }
 
   return badRequest('未知操作');
+});
+
+// POST /api/accounts/inbox-counts
+// Refresh the Inbox totals of specific accounts. The list view calls this lazily
+// for the rows it renders, so counts appear for accounts that were never tested
+// instead of showing "—" forever.
+accounts.post('/inbox-counts', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: number[] };
+  const ids = [...new Set((body.ids ?? []).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return badRequest('请选择账号');
+  if (ids.length > MAX_INBOX_COUNTS_PER_REQUEST) {
+    return badRequest(`单次最多统计 ${MAX_INBOX_COUNTS_PER_REQUEST} 个账号，请分批操作`);
+  }
+
+  const found = await query<AccountRow>(
+    c.env.DB,
+    `SELECT * FROM accounts WHERE id IN (${ids.map(() => '?').join(',')})`,
+    ids
+  );
+  const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
+
+  const results = await mapWithConcurrency(found, CONNECTION_TEST_CONCURRENCY, async (account) => {
+    const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
+    if (!tokenResult.token) {
+      const dead = deleteInvalid && isPermanentTokenFailure(tokenResult.error);
+      return {
+        id: account.id,
+        email: account.email,
+        total: null as number | null,
+        checked_at: null as string | null,
+        deleted: dead,
+        status: dead ? undefined : ('error' as const),
+        error: tokenResult.error,
+      };
+    }
+
+    const rotated =
+      tokenResult.newRefreshToken && tokenResult.newRefreshToken !== account.refresh_token
+        ? tokenResult.newRefreshToken
+        : undefined;
+    const countResult = await getInboxTotal(tokenResult.token);
+    if (countResult.total === undefined) {
+      return {
+        id: account.id,
+        email: account.email,
+        total: null as number | null,
+        checked_at: null as string | null,
+        deleted: false,
+        status: 'active' as const,
+        rotated,
+        error: countResult.error,
+      };
+    }
+    return {
+      id: account.id,
+      email: account.email,
+      total: countResult.total,
+      checked_at: new Date().toISOString(),
+      deleted: false,
+      status: 'active' as const,
+      rotated,
+    };
+  });
+
+  const statements: { sql: string; params?: unknown[] }[] = [];
+  for (const result of results) {
+    if (result.deleted) {
+      statements.push({ sql: 'DELETE FROM account_tags WHERE account_id = ?', params: [result.id] });
+      statements.push({ sql: 'DELETE FROM accounts WHERE id = ?', params: [result.id] });
+      continue;
+    }
+    const assignments: string[] = ['status = ?', 'updated_at = CURRENT_TIMESTAMP'];
+    const params: unknown[] = [result.status];
+    if (result.rotated) {
+      assignments.unshift('refresh_token = ?');
+      params.unshift(result.rotated);
+    }
+    if (result.total !== null) {
+      assignments.push('inbox_total = ?', 'inbox_count_updated_at = ?');
+      params.push(result.total, result.checked_at);
+    }
+    statements.push({
+      sql: `UPDATE accounts SET ${assignments.join(', ')} WHERE id = ?`,
+      params: [...params, result.id],
+    });
+  }
+  await batchRun(c.env.DB, statements);
+
+  const counted = results.filter((result) => result.total !== null).length;
+  const removed = results.filter((result) => result.deleted).length;
+  return ok({
+    requested: ids.length,
+    counted,
+    deleted: removed,
+    results: results.map((result) => ({
+      id: result.id,
+      email: result.email,
+      deleted: result.deleted,
+      inbox: { total: result.total, checked_at: result.checked_at },
+      ...(result.error ? { error: result.error } : {}),
+    })),
+  }, `统计完成：成功 ${counted}${removed ? `，删除失效 ${removed}` : ''}`);
 });
 
 // GET /api/accounts/:id
@@ -667,10 +821,12 @@ accounts.post('/:id/test', async (c) => {
   if (!acc) return notFound('账号不存在');
 
   const result = await probeAccount(acc);
-  await persistProbeResults(c.env.DB, [{ account: acc, result }]);
+  const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
+  const deletedIds = await persistProbeResults(c.env.DB, [{ account: acc, result }], deleteInvalid);
+  const deleted = deletedIds.length > 0;
   return ok(
-    publicProbeResult(result),
-    result.connected ? 'Graph API 连接正常' : 'Graph API 连接失败'
+    { ...publicProbeResult(result), deleted },
+    result.connected ? 'Graph API 连接正常' : deleted ? 'Token 已永久失效，账号已删除' : 'Graph API 连接失败'
   );
 });
 

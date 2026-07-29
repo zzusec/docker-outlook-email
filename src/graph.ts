@@ -37,6 +37,23 @@ export function isImapOnlyScope(scope?: string): boolean {
   );
 }
 
+// OAuth error codes that mean this refresh_token can never work again: the grant
+// was revoked/expired, or the user must re-consent interactively. Everything else
+// (network errors, 429 throttling, 5xx, invalid_client — a wrong client_id rather
+// than a dead mailbox) is transient or operator error and must NOT delete accounts.
+const PERMANENT_TOKEN_ERRORS = new Set([
+  'invalid_grant',
+  'unauthorized_client',
+  'interaction_required',
+  'consent_required',
+  'account_disabled',
+]);
+
+export function isPermanentTokenFailure(error?: GraphError): boolean {
+  if (!error?.code) return false;
+  return PERMANENT_TOKEN_ERRORS.has(error.code.toLowerCase());
+}
+
 // Get access token using refresh_token.
 // Returns new_refresh_token when Microsoft issues a rotated token.
 //

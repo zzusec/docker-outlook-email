@@ -1,17 +1,26 @@
 import type { Env, AccountRow } from './types';
 import { query, first, run } from './db';
-import { getAccessToken, getMailAccessToken, fetchEmails } from './graph';
+import {
+  getMailAccessToken,
+  getInboxTotal,
+  isPermanentTokenFailure,
+  fetchEmails,
+} from './graph';
 import { sendTelegramMessage, escapeHtml } from './telegram';
 
 // Hard cap per run: each account = 1 subrequest (token refresh); free plan allows 50/invocation
 const MAX_BATCH = 40;
+
+// With inbox-count refresh on, each account costs a token call plus a folder call
+// (and each may retry on the Outlook REST fallback), so the batch has to be smaller.
+const MAX_BATCH_WITH_INBOX = 20;
 
 // Push budget is tighter: each account costs 1 token + 1 fetch + up to N sends.
 // Keep the account batch small and cap messages so we stay well under 50 subrequests.
 const PUSH_MAX_ACCOUNTS = 8;
 const PUSH_MAX_MSGS_PER_ACCOUNT = 3;
 
-async function getSetting(db: D1Database, key: string): Promise<string | undefined> {
+export async function getSetting(db: D1Database, key: string): Promise<string | undefined> {
   const row = await first<{ value: string }>(db, 'SELECT value FROM settings WHERE key = ?', [key]);
   return row?.value;
 }
@@ -42,22 +51,34 @@ export async function runTokenRefresh(env: Env, opts: { force?: boolean } = {}):
     }
   }
 
+  // Both default to on: a refresh already holds a working token, so counting the
+  // inbox is nearly free, and dead mailboxes are what the refresh is meant to find.
+  const deleteInvalid = (await getSetting(db, 'token_refresh_delete_invalid')) !== '0';
+  const updateInbox = (await getSetting(db, 'token_refresh_update_inbox')) !== '0';
+
   const batch = Math.min(
     parseInt((await getSetting(db, 'token_refresh_batch')) || '20', 10) || 20,
-    MAX_BATCH
+    updateInbox ? MAX_BATCH_WITH_INBOX : MAX_BATCH
   );
+
+  // Optional scope: check only one group instead of the whole account list
+  const groupSetting = parseInt((await getSetting(db, 'token_refresh_group_id')) || '', 10);
+  const groupId = Number.isInteger(groupSetting) && groupSetting > 0 ? groupSetting : null;
 
   // Oldest-updated active accounts first, so refreshes rotate across runs
   const accounts = await query<AccountRow>(
     db,
-    `SELECT * FROM accounts WHERE status != 'disabled' ORDER BY updated_at ASC LIMIT ?`,
-    [batch]
+    `SELECT * FROM accounts WHERE status != 'disabled'${groupId ? ' AND group_id = ?' : ''}
+     ORDER BY updated_at ASC LIMIT ?`,
+    groupId ? [groupId, batch] : [batch]
   );
 
   let ok = 0;
   let fail = 0;
+  let deleted = 0;
+  let counted = 0;
   for (const acc of accounts) {
-    const res = await getAccessToken(acc.client_id, acc.refresh_token);
+    const res = await getMailAccessToken(acc.client_id, acc.refresh_token);
     if (res.token) {
       ok++;
       const newToken = res.newRefreshToken && res.newRefreshToken !== acc.refresh_token ? res.newRefreshToken : acc.refresh_token;
@@ -66,13 +87,33 @@ export async function runTokenRefresh(env: Env, opts: { force?: boolean } = {}):
         "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [newToken, acc.id]
       );
+      if (updateInbox) {
+        const countResult = await getInboxTotal(res.token);
+        if (countResult.total !== undefined) {
+          counted++;
+          await run(
+            db,
+            'UPDATE accounts SET inbox_total = ?, inbox_count_updated_at = ? WHERE id = ?',
+            [countResult.total, new Date().toISOString(), acc.id]
+          );
+        }
+      }
+    } else if (deleteInvalid && isPermanentTokenFailure(res.error)) {
+      // Refresh token revoked/expired beyond repair — drop the account so the list
+      // only holds mailboxes that can still be used (tags/push state cascade).
+      deleted++;
+      await run(db, 'DELETE FROM account_tags WHERE account_id = ?', [acc.id]);
+      await run(db, 'DELETE FROM accounts WHERE id = ?', [acc.id]);
     } else {
       fail++;
       await run(db, "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [acc.id]);
     }
   }
 
-  const summary = `${new Date().toISOString()} 刷新 ${accounts.length} 个：成功 ${ok}，失败 ${fail}`;
+  const summary =
+    `${new Date().toISOString()} 刷新 ${accounts.length} 个：成功 ${ok}，失败 ${fail}` +
+    (deleted ? `，删除失效 ${deleted}` : '') +
+    (updateInbox ? `，更新邮件数 ${counted}` : '');
   await setSetting(db, 'token_refresh_last_run', String(Date.now()));
   await setSetting(db, 'token_refresh_last_result', summary);
   return summary;

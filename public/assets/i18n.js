@@ -142,6 +142,11 @@ var I18N_EN = {
   '邮件数尚未统计': 'Message count not measured yet',
   '上次统计：{v}': 'Last measured: {v}',
   '{n} 封': '{n} mails',
+  '正在统计邮件数': 'Counting messages...',
+  '刷新本页邮件数': 'Recount this page',
+  '重新统计本页邮箱的收件箱邮件数': 'Re-measure the Inbox message count for accounts on this page',
+  '统计中...': 'Counting...',
+  '已自动删除 {n} 个失效邮箱': '{n} dead mailboxes were removed automatically',
   '测试': 'Test',
   '测试中...': 'Testing...',
   '连接失败': 'Connection failed',
@@ -312,6 +317,26 @@ var I18N_EN = {
   '已生成': 'Generated',
   '已停用': 'Disabled',
   '启用定时刷新': 'Enable scheduled refresh',
+  '刷新时自动删除失效邮箱': 'Delete dead mailboxes on refresh',
+  '刷新时顺带统计邮件数': 'Also count Inbox messages on refresh',
+  '检测范围（分组）': 'Check scope (group)',
+  '检测当前分组': 'Check current group',
+  '按当前筛选（分组/状态/标签）逐批检测所有邮箱': 'Check every mailbox matching the current group / status / tag filter, batch by batch',
+  '将检测「{scope}」下的 {n} 个邮箱，可随时停止。失效邮箱会按设置自动删除，确认？':
+    'This checks {n} mailboxes in "{scope}" and can be stopped at any time. Dead mailboxes are deleted according to your settings. Continue?',
+  '当前筛选下没有账号': 'No accounts match the current filter',
+  '批量检测': 'Bulk check',
+  '共 {n} 个': '{n} total',
+  '已检测 {n}': '{n} checked',
+  '正常 {n}': '{n} ok',
+  '失败 {n}': '{n} failed',
+  '已删除 {n}': '{n} deleted',
+  '停止': 'Stop',
+  '正在停止...': 'Stopping...',
+  '已停止': 'Stopped',
+  '检测完成': 'Check complete',
+  '完成': 'Done',
+  'Token 已永久失效，账号已删除': 'The refresh token is permanently dead; the account was deleted',
   '间隔（小时）': 'Interval (hours)',
   '每批数量（≤40）': 'Batch size (≤40)',
   '<b>微软风控（最重要）</b>：refresh_token 每次刷新都会被微软轮换，高频自动刷新可能触发 Graph 限流（429），对「领来的」账号还可能被微软判定异常活动而<b>锁号</b>。Token 只要每隔几天被用到就不会过期，<b>没必要高频刷，建议间隔 ≥ 12 小时，默认 24 小时足够</b>。':
@@ -452,6 +477,19 @@ var SERVER_EN_PATTERNS = [
   }],
   // Cron result summaries (stored in DB, shown on the settings page)
   [/^(.+) 刷新 (\d+) 个：成功 (\d+)，失败 (\d+)$/, '$1 refreshed $2 accounts: $3 ok, $4 failed'],
+  [/^(.+) 刷新 (\d+) 个：成功 (\d+)，失败 (\d+)(?:，删除失效 (\d+))?(?:，更新邮件数 (\d+))?$/,
+    function (m, ts, total, okCount, failed, deleted, counted) {
+      var out = ts + ' refreshed ' + total + ' accounts: ' + okCount + ' ok, ' + failed + ' failed';
+      if (deleted) out += ', ' + deleted + ' dead removed';
+      if (counted) out += ', ' + counted + ' counts updated';
+      return out;
+    }],
+  [/^统计完成：成功 (\d+)(?:，删除失效 (\d+))?$/, function (m, counted, deleted) {
+    return 'Counted ' + counted + ' mailboxes' + (deleted ? ', ' + deleted + ' dead removed' : '');
+  }],
+  [/^Token 刷新完成：成功 (\d+)，失败 (\d+)(?:，删除失效 (\d+))?$/, function (m, okCount, failed, deleted) {
+    return 'Token refresh done: ' + okCount + ' ok, ' + failed + ' failed' + (deleted ? ', ' + deleted + ' dead removed' : '');
+  }],
   [/^(.+) 推送：扫描 (\d+) 个账号，发送 (\d+) 条，失败账号 (.*)$/, '$1 push: scanned $2 accounts, sent $3 messages, failed accounts: $4'],
 ];
 

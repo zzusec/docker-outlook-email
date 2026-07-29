@@ -454,6 +454,7 @@ async function renderAccounts(el) {
     <span style="flex:1"></span>
     <button class="btn btn-primary btn-sm" onclick="showAddAccountModal()">${t('+ 添加账号')}</button>
     <button class="btn btn-sm" onclick="showImportModal()">${t('批量导入')}</button>
+    <button class="btn btn-sm" onclick="detectCurrentScope()" title="${t('按当前筛选（分组/状态/标签）逐批检测所有邮箱')}">${t('检测当前分组')}</button>
     <button class="btn btn-sm" onclick="exportAccounts()">${t('导出全部')}</button>
   </div>
   <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
@@ -487,6 +488,7 @@ async function renderAccounts(el) {
       ${[20, 50, 100].map(n => `<option value="${n}" ${n === accPageSize ? 'selected' : ''}>${n}</option>`).join('')}
     </select>
     <span style="font-size:12px;color:var(--text-dim)">${t('条')}</span>
+    <button class="btn btn-sm" onclick="refreshPageInboxCounts(this)" title="${t('重新统计本页邮箱的收件箱邮件数')}">${t('刷新本页邮件数')}</button>
     <span style="flex:1"></span>
     <button class="btn btn-sm" id="accPrevBtn" onclick="accTurnPage(-1)">${t('上一页')}</button>
     <span id="accPageInfo" style="font-size:12.5px;color:var(--text-muted);min-width:52px;text-align:center"></span>
@@ -540,6 +542,174 @@ function renderAccountsTable() {
   if (all) all.checked = false;
   const wrap = tbody.closest('.accounts-table-wrap');
   if (wrap) wrap.scrollTop = 0;
+
+  // Inbox totals are only stored once an account has actually been probed, so the
+  // vast majority of rows would render "—" forever. Fill in the visible page.
+  hydrateInboxCounts(accountsView.slice(start, start + accPageSize));
+}
+
+// ---- Lazy Inbox-count hydration for the visible page ----
+// The backend caps a single request at 20 accounts (one token + one folder call
+// each), so pages larger than that are fetched in sequential chunks.
+var INBOX_COUNT_CHUNK = 20;
+// Accounts already attempted this session — including failures, so a mailbox that
+// cannot be counted is not retried on every page turn.
+var inboxCountAttempted = new Set();
+var inboxHydrateRun = 0;
+
+async function hydrateInboxCounts(pageAccounts, opts) {
+  const force = Boolean(opts && opts.force);
+  const run = ++inboxHydrateRun;
+  const pending = (pageAccounts || []).filter(a =>
+    a && (force || (a.inbox?.total === null || a.inbox?.total === undefined) && !inboxCountAttempted.has(a.id))
+  );
+  if (!pending.length) return;
+
+  if (!force) {
+    // Typing in the search box re-renders the table on every keystroke; wait for
+    // the view to settle so only the page the user actually lands on is counted.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (run !== inboxHydrateRun) return;
+  }
+
+  for (const acc of pending) {
+    inboxCountAttempted.add(acc.id);
+    const el = document.querySelector(`[data-inbox-id="${acc.id}"]`);
+    if (el) { el.textContent = '…'; el.title = t('正在统计邮件数'); }
+  }
+
+  for (let i = 0; i < pending.length; i += INBOX_COUNT_CHUNK) {
+    // A page turn (or a reload) started a newer run: stop counting the old page
+    if (run !== inboxHydrateRun) return;
+    const part = pending.slice(i, i + INBOX_COUNT_CHUNK);
+    const res = await api('/accounts/inbox-counts', {
+      method: 'POST',
+      body: JSON.stringify({ ids: part.map(a => a.id) }),
+    });
+    if (!res?.success) {
+      // Restore the placeholder so a transient failure can be retried later
+      for (const acc of part) {
+        inboxCountAttempted.delete(acc.id);
+        const el = document.querySelector(`[data-inbox-id="${acc.id}"]`);
+        if (el) el.outerHTML = accountInboxCountHtml(acc);
+      }
+      continue;
+    }
+    applyInboxCountResults(res.data?.results || []);
+  }
+}
+
+// ---- Whole-scope detection (current group / status / tag filter) ----
+// Runs the same probe as "测试" (token + mail access + Inbox count) over every
+// account in the current view, 10 at a time — the per-request server cap.
+var DETECT_CHUNK = 10;
+var detectStop = false;
+
+async function detectCurrentScope() {
+  const targets = accountsView.slice();
+  if (!targets.length) { toast(t('当前筛选下没有账号'), 'error'); return; }
+  const sel = document.getElementById('accountGroupFilter');
+  const scope = sel && sel.value ? sel.options[sel.selectedIndex].text : t('全部分组');
+  if (!confirm(t('将检测「{scope}」下的 {n} 个邮箱，可随时停止。失效邮箱会按设置自动删除，确认？', { scope, n: targets.length }))) return;
+
+  detectStop = false;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-header"><h3>${t('批量检测')}</h3></div>
+      <div class="modal-body">
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">${esc(scope)} · ${t('共 {n} 个', { n: targets.length })}</div>
+        <div style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden;margin-bottom:10px">
+          <div id="detectBar" style="height:100%;width:0;background:var(--primary);transition:width .2s"></div>
+        </div>
+        <div id="detectStat" style="font-size:13px"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="detectStopBtn">${t('停止')}</button>
+        <button class="btn btn-primary" id="detectCloseBtn" style="display:none">${t('完成')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const bar = overlay.querySelector('#detectBar');
+  const stat = overlay.querySelector('#detectStat');
+  const stopBtn = overlay.querySelector('#detectStopBtn');
+  const closeBtn = overlay.querySelector('#detectCloseBtn');
+  stopBtn.onclick = () => { detectStop = true; stopBtn.disabled = true; stopBtn.textContent = t('正在停止...'); };
+  closeBtn.onclick = () => { overlay.remove(); navigate('accounts'); };
+
+  let done = 0, connected = 0, failed = 0, removed = 0;
+  const paint = () => {
+    bar.style.width = Math.round((done / targets.length) * 100) + '%';
+    stat.innerHTML = `${t('已检测 {n}', { n: done })} / ${targets.length} ·
+      <span style="color:var(--success)">${t('正常 {n}', { n: connected })}</span> ·
+      <span style="color:var(--danger)">${t('失败 {n}', { n: failed })}</span> ·
+      <span style="color:var(--text-muted)">${t('已删除 {n}', { n: removed })}</span>`;
+  };
+  paint();
+
+  for (let i = 0; i < targets.length && !detectStop; i += DETECT_CHUNK) {
+    const part = targets.slice(i, i + DETECT_CHUNK);
+    const res = await api('/accounts/batch', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'test', ids: part.map(a => a.id) }),
+    });
+    if (res?.success) {
+      connected += res.data?.connected || 0;
+      failed += res.data?.failed || 0;
+      removed += res.data?.deleted || 0;
+      for (const result of res.data?.results || []) {
+        if (result.deleted) continue;
+        for (const list of [state.accounts, accountsView]) {
+          const acc = list.find(a => a.id === result.id);
+          if (acc && result.inbox) acc.inbox = result.inbox;
+        }
+      }
+    } else {
+      failed += part.length;
+    }
+    done += part.length;
+    paint();
+  }
+
+  stopBtn.style.display = 'none';
+  closeBtn.style.display = '';
+  stat.innerHTML += `<div style="margin-top:8px;color:var(--text-muted)">${detectStop ? t('已停止') : t('检测完成')}</div>`;
+}
+
+// Manual recount of the current page (also refreshes counts that are already known)
+async function refreshPageInboxCounts(btn) {
+  const start = (accPage - 1) * accPageSize;
+  const pageAccounts = accountsView.slice(start, start + accPageSize);
+  if (!pageAccounts.length) return;
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = t('统计中...'); }
+  await hydrateInboxCounts(pageAccounts, { force: true });
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+}
+
+// Merge server results back into the cached lists and repaint just the badges.
+// Accounts deleted server-side (dead refresh token) drop out of the table.
+function applyInboxCountResults(results) {
+  const removedIds = new Set();
+  for (const result of results) {
+    if (result.deleted) { removedIds.add(result.id); continue; }
+    for (const list of [state.accounts, accountsView]) {
+      const acc = list.find(a => a.id === result.id);
+      if (acc) acc.inbox = result.inbox;
+    }
+    const acc = state.accounts.find(a => a.id === result.id) || { id: result.id, inbox: result.inbox };
+    const el = document.querySelector(`[data-inbox-id="${result.id}"]`);
+    if (el) el.outerHTML = accountInboxCountHtml(acc);
+  }
+
+  if (removedIds.size) {
+    state.accounts = state.accounts.filter(a => !removedIds.has(a.id));
+    accountsView = accountsView.filter(a => !removedIds.has(a.id));
+    for (const id of removedIds) selectedAccountIds.delete(id);
+    toast(t('已自动删除 {n} 个失效邮箱', { n: removedIds.size }), 'error', 5000);
+    renderAccountsTable();
+  }
 }
 
 function accSetPageSize(v) {
@@ -574,7 +744,7 @@ function accountInboxCountHtml(account) {
   const label = hasCount
     ? t('{n} 封', { n: total.toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN') })
     : '—';
-  return `<span class="${className}" title="${esc(title)}">${label}</span>`;
+  return `<span class="${className}" data-inbox-id="${account.id}" title="${esc(title)}">${label}</span>`;
 }
 
 function renderAccountRows(accounts) {
@@ -1070,6 +1240,8 @@ async function testAccount(id, btn) {
   btn.textContent = t('测试');
   if (res?.success && res.data?.connected) {
     toast(t('Graph API 连接正常'));
+  } else if (res?.data?.deleted) {
+    toast(t('Token 已永久失效，账号已删除'), 'error', 5000);
   } else {
     toast(res?.data?.error || res?.error?.message || t('连接失败'), 'error');
   }
@@ -1632,9 +1804,14 @@ async function viewTempMessage(emailId, messageId) {
 // ========== Settings ==========
 async function renderSettings(el) {
   el.innerHTML = '<div class="loading"><div class="spinner"></div>' + t('加载中...') + '</div>';
+  // The scheduled-check scope selector lists groups, so they must be loaded here
+  await loadGroups();
   const res = await api('/settings');
   const settings = res?.data || {};
   const refreshEnabled = settings.token_refresh_enabled === '1';
+  // Both default to on when the key was never written (matches the backend default)
+  const deleteInvalidEnabled = settings.token_refresh_delete_invalid !== '0';
+  const updateInboxEnabled = settings.token_refresh_update_inbox !== '0';
   const telegramEnabled = settings.telegram_push_enabled === '1';
   const externalApiEnabled = Boolean(settings.external_api_key);
   const statusChip = (label, enabled) => `<div class="settings-status-chip ${enabled ? 'is-active' : ''}">
@@ -1716,6 +1893,59 @@ async function renderSettings(el) {
             ${externalApiEnabled ? `<div class="form-group">
               <label class="form-label">${t('调用示例')}</label>
               <input class="form-input settings-mono settings-example" readonly value="${location.origin}/api/external/emails?email=${t('你的邮箱')}&key=${esc(settings.external_api_key)}" onclick="this.select()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('接口生成器')}</label>
+              <div style="background:var(--bg-hover);border:1px solid var(--border-light);border-radius:8px;padding:12px;margin-bottom:12px">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+                  <div>
+                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('国家')}</label>
+                    <select class="form-select" id="genCountry" onchange="updateGeneratedUrl()" style="font-size:13px">
+                      <option value="">${t('全部')}</option>
+                      <option value="US">美国 (US)</option>
+                      <option value="UK">英国 (UK)</option>
+                      <option value="CA">加拿大 (CA)</option>
+                      <option value="AU">澳大利亚 (AU)</option>
+                      <option value="DE">德国 (DE)</option>
+                      <option value="FR">法国 (FR)</option>
+                      <option value="JP">日本 (JP)</option>
+                      <option value="KR">韩国 (KR)</option>
+                      <option value="SG">新加坡 (SG)</option>
+                      <option value="HK">香港 (HK)</option>
+                      <option value="TW">台湾 (TW)</option>
+                      <option value="BR">巴西 (BR)</option>
+                      <option value="IN">印度 (IN)</option>
+                      <option value="MX">墨西哥 (MX)</option>
+                      <option value="NL">荷兰 (NL)</option>
+                      <option value="ES">西班牙 (ES)</option>
+                      <option value="IT">意大利 (IT)</option>
+                      <option value="RU">俄罗斯 (RU)</option>
+                      <option value="ZA">南非 (ZA)</option>
+                      <option value="AE">阿联酋 (AE)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('IP类型')}</label>
+                    <select class="form-select" id="genIpType" onchange="updateGeneratedUrl()" style="font-size:13px">
+                      <option value="">${t('全部')}</option>
+                      <option value="residential">${t('住宅IP')}</option>
+                      <option value="native">${t('原生IP')}</option>
+                      <option value="datacenter">${t('机房IP')}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('接口类型')}</label>
+                    <select class="form-select" id="genApiType" onchange="updateGeneratedUrl()" style="font-size:13px">
+                      <option value="accounts">${t('获取邮箱列表')}</option>
+                      <option value="emails">${t('获取邮件列表')}</option>
+                    </select>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input class="form-input settings-mono" id="generatedUrl" readonly style="flex:1;font-size:12px" onclick="this.select()">
+                  <button class="btn btn-sm" type="button" onclick="copyText(document.getElementById('generatedUrl').value, this)">${t('复制')}</button>
+                </div>
+              </div>
             </div>` : ''}
           </div>
           <div class="settings-actions">
@@ -1745,6 +1975,23 @@ async function renderSettings(el) {
                 <label class="form-label">${t('每批数量（≤40）')}</label>
                 <input class="form-input" id="sRefreshBatch" type="number" min="1" max="40" value="${esc(settings.token_refresh_batch || '20')}">
               </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('检测范围（分组）')}</label>
+              <select class="form-select" id="sRefreshGroup">
+                <option value="">${t('全部分组')}</option>
+                ${state.groups.map(g => `<option value="${g.id}" ${String(settings.token_refresh_group_id || '') === String(g.id) ? 'selected' : ''}>${esc(g.name)} (${g.account_count ?? 0})</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="settings-switch" title="${t('刷新时自动删除失效邮箱')}">
+                <input type="checkbox" id="sRefreshDeleteInvalid" ${deleteInvalidEnabled ? 'checked' : ''}>
+                <span class="settings-switch-track"></span><span>${t('刷新时自动删除失效邮箱')}</span>
+              </label>
+              <label class="settings-switch" title="${t('刷新时顺带统计邮件数')}" style="margin-top:8px">
+                <input type="checkbox" id="sRefreshUpdateInbox" ${updateInboxEnabled ? 'checked' : ''}>
+                <span class="settings-switch-track"></span><span>${t('刷新时顺带统计邮件数')}</span>
+              </label>
             </div>
             <div class="settings-last-run"><span>${t('上次执行')}</span><b>${esc(tServer(settings.token_refresh_last_result || '尚未执行'))}</b></div>
             <details class="settings-notice">
@@ -1845,6 +2092,9 @@ async function saveRefreshSettings() {
     token_refresh_enabled: document.getElementById('sRefreshEnabled').checked ? '1' : '0',
     token_refresh_interval_hours: document.getElementById('sRefreshInterval').value.trim() || '24',
     token_refresh_batch: document.getElementById('sRefreshBatch').value.trim() || '20',
+    token_refresh_delete_invalid: document.getElementById('sRefreshDeleteInvalid').checked ? '1' : '0',
+    token_refresh_update_inbox: document.getElementById('sRefreshUpdateInbox').checked ? '1' : '0',
+    token_refresh_group_id: document.getElementById('sRefreshGroup').value,
   };
   const res = await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
   if (res?.success) toast(res.message || t('已保存'));
@@ -1871,6 +2121,28 @@ async function clearApiKey() {
   const res = await api('/settings/external-key', { method: 'DELETE' });
   if (res?.success) { toast(res.message || t('已停用')); navigate('settings'); }
   else toast(res?.error?.message || t('操作失败'), 'error');
+}
+
+// 动态生成外部接口 URL
+function updateGeneratedUrl() {
+  const country = document.getElementById('genCountry')?.value || '';
+  const ipType = document.getElementById('genIpType')?.value || '';
+  const apiType = document.getElementById('genApiType')?.value || 'accounts';
+  const apiKey = document.getElementById('sExternalKey')?.value || '';
+
+  if (!apiKey) return;
+
+  let url = `${location.origin}/api/external/${apiType}?key=${apiKey}`;
+
+  if (country) url += `&country=${country}`;
+  if (ipType) url += `&ip_type=${ipType}`;
+
+  if (apiType === 'emails') {
+    url += `&email=${encodeURIComponent(t('你的邮箱'))}`;
+  }
+
+  const input = document.getElementById('generatedUrl');
+  if (input) input.value = url;
 }
 
 async function saveSettings() {

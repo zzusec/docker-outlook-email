@@ -156,9 +156,9 @@ describe('accounts route: status recovery on token update', () => {
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
       { DB: mockDB } as any
     );
-    // The full UPDATE binds 8 params:
-    // [email, password, client_id, refresh_token, group_id, remark, status, id]
-    const updateCall = mockDB._stmt.bind.mock.calls.find((args) => args.length === 8);
+    // The full UPDATE binds 10 params:
+    // [email, password, client_id, refresh_token, group_id, remark, status, country, ip_type, id]
+    const updateCall = mockDB._stmt.bind.mock.calls.find((args) => args.length === 10);
     return { res, updateCall };
   }
 
@@ -181,6 +181,90 @@ describe('accounts route: status recovery on token update', () => {
       { ...baseAccount, status: 'disabled' }
     );
     expect(updateCall![6]).toBe('disabled');
+  });
+});
+
+// Inbox totals used to appear only for accounts that had been tested manually,
+// so most rows rendered "—" forever. The list view now hydrates them on demand.
+describe('accounts route: on-demand inbox counts', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('counts the requested accounts and stores the totals', async () => {
+    const mockDB = createMockDB() as ReturnType<typeof createMockDB> & { batch: ReturnType<typeof vi.fn> };
+    mockDB.batch = vi.fn().mockResolvedValue([]);
+    mockDB._stmt.all.mockResolvedValue({
+      results: [{ id: 7, email: 'a@b.c', client_id: 'cid', refresh_token: 'rt', status: 'active' }],
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: 'at',
+        refresh_token: 'rt-new',
+        scope: 'https://graph.microsoft.com/Mail.ReadWrite offline_access',
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ totalItemCount: 182 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const accountsRoute = (await import('../src/routes/accounts')).default;
+    const res = await accountsRoute.request(
+      '/inbox-counts',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [7] }) },
+      { DB: mockDB } as any
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { counted: number; results: Array<{ inbox: { total: number } }> } };
+    expect(body.data.counted).toBe(1);
+    expect(body.data.results[0].inbox.total).toBe(182);
+    const statements = mockDB.batch.mock.calls[0][0] as unknown[];
+    expect(statements.length).toBe(1);
+    expect(mockDB.prepare.mock.calls.some((args) => String(args[0]).includes('inbox_total = ?'))).toBe(true);
+  });
+});
+
+// A refresh token that Microsoft rejects with invalid_grant can never be revived,
+// so the scheduled refresh drops the account instead of parking it in "error".
+describe('cron token refresh: dead mailbox cleanup', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('deletes accounts whose refresh token failed permanently', async () => {
+    const mockDB = createMockDB();
+    mockDB._stmt.all.mockResolvedValue({
+      results: [{ id: 9, email: 'dead@b.c', client_id: 'cid', refresh_token: 'rt', status: 'active' }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'token revoked' }), { status: 400 })
+    ));
+
+    const { runTokenRefresh } = await import('../src/cron');
+    const summary = await runTokenRefresh({ DB: mockDB } as any, { force: true });
+
+    expect(summary).toContain('删除失效 1');
+    expect(mockDB.prepare.mock.calls.some((args) => String(args[0]) === 'DELETE FROM accounts WHERE id = ?')).toBe(true);
+    expect(mockDB.prepare.mock.calls.some((args) => String(args[0]).includes("status = 'error'"))).toBe(false);
+  });
+
+  it('keeps accounts whose refresh only hit a transient failure', async () => {
+    const mockDB = createMockDB();
+    mockDB._stmt.all.mockResolvedValue({
+      results: [{ id: 10, email: 'busy@b.c', client_id: 'cid', refresh_token: 'rt', status: 'active' }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'temporarily_unavailable' }), { status: 503 })
+    ));
+
+    const { runTokenRefresh } = await import('../src/cron');
+    const summary = await runTokenRefresh({ DB: mockDB } as any, { force: true });
+
+    expect(summary).toContain('失败 1');
+    expect(summary).not.toContain('删除失效');
+    expect(mockDB.prepare.mock.calls.some((args) => String(args[0]) === 'DELETE FROM accounts WHERE id = ?')).toBe(false);
   });
 });
 
@@ -288,9 +372,9 @@ describe('static asset deployment cache policy', () => {
 
     expect(serverSource).toContain("c.header('Cache-Control', 'no-cache')");
     expect(serverSource).not.toContain('max-age=3600');
-    expect(indexSource).toContain('/assets/style.css?v=20260728-1');
-    expect(indexSource).toContain('/assets/i18n.js?v=20260728-1');
-    expect(indexSource).toContain('/assets/app.js?v=20260728-1');
-    expect(loginSource).toContain('/assets/i18n.js?v=20260728-1');
+    expect(indexSource).toContain('/assets/style.css?v=20260729-1');
+    expect(indexSource).toContain('/assets/i18n.js?v=20260729-1');
+    expect(indexSource).toContain('/assets/app.js?v=20260729-1');
+    expect(loginSource).toContain('/assets/i18n.js?v=20260729-1');
   });
 });

@@ -159,6 +159,9 @@ settings.put('/', async (c) => {
     token_refresh_enabled: 'enabled',
     token_refresh_interval_hours: 'interval',
     token_refresh_batch: 'batch',
+    token_refresh_delete_invalid: 'delete-invalid',
+    token_refresh_update_inbox: 'update-inbox',
+    token_refresh_group_id: 'group',
   };
   for (const [key, label] of Object.entries(refreshKeys)) {
     if (body[key] !== undefined) {
