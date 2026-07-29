@@ -12,6 +12,31 @@
 
 ## 2. 接口
 
+### 获取邮箱列表
+
+```
+GET /api/external/accounts
+```
+
+返回所有可用邮箱账号列表。
+
+**参数**：无
+
+**返回示例**：
+
+```json
+{
+  "success": true,
+  "data": {
+    "count": 100,
+    "items": [
+      { "email": "abc@outlook.com", "status": "active", "remark": "" },
+      { "email": "test@hotmail.com", "status": "active", "remark": "测试账号" }
+    ]
+  }
+}
+```
+
 ### 获取邮件列表
 
 ```
@@ -31,6 +56,7 @@ GET /api/external/emails
 | `folder` | ❌ | `inbox`(默认) / `junkemail` / `deleteditems` / `all`（收件箱+垃圾箱合并） |
 | `top` | ❌ | 返回条数，默认 10，最大 50 |
 | `keyword` | ❌ | 搜索关键词 |
+| `extract_code` | ❌ | 传 `1` 时自动从邮件中提取验证码，返回 `codes` 字段 |
 
 ## 3. 调用示例
 
@@ -65,6 +91,43 @@ for mail in data["data"]["items"]:
         print("验证码:", m.group(1))
         break
 ```
+
+**使用 `extract_code=1` 自动提取验证码**
+
+```bash
+curl "https://你的域名/api/external/emails?email=abc@outlook.com&key=你的Key&extract_code=1&top=5"
+```
+
+返回结果会包含 `codes` 字段：
+
+```json
+{
+  "success": true,
+  "data": {
+    "email": "abc@outlook.com",
+    "count": 1,
+    "items": [
+      {
+        "id": "AAQ...",
+        "subject": "Your verification code is 123456",
+        "from": { "name": "Microsoft", "address": "account@microsoft.com" },
+        "receivedDateTime": "2026-06-08T08:00:00Z",
+        "bodyPreview": "Use code 123456 to sign in...",
+        "isRead": false,
+        "codes": ["123456"]
+      }
+    ]
+  }
+}
+```
+
+**获取邮箱列表**
+
+```bash
+curl "https://你的域名/api/external/accounts?key=你的Key"
+```
+
+返回所有可用邮箱，用于选择要查询的邮箱。
 
 ## 4. 返回格式
 
