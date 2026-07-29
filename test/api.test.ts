@@ -372,9 +372,9 @@ describe('static asset deployment cache policy', () => {
 
     expect(serverSource).toContain("c.header('Cache-Control', 'no-cache')");
     expect(serverSource).not.toContain('max-age=3600');
-    expect(indexSource).toContain('/assets/style.css?v=20260729-2');
-    expect(indexSource).toContain('/assets/i18n.js?v=20260729-2');
-    expect(indexSource).toContain('/assets/app.js?v=20260729-2');
-    expect(loginSource).toContain('/assets/i18n.js?v=20260729-2');
+    expect(indexSource).toContain('/assets/style.css?v=20260729-3');
+    expect(indexSource).toContain('/assets/i18n.js?v=20260729-3');
+    expect(indexSource).toContain('/assets/app.js?v=20260729-3');
+    expect(loginSource).toContain('/assets/i18n.js?v=20260729-3');
   });
 });

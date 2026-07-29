@@ -460,6 +460,8 @@ async function renderAccounts(el) {
   <div id="detectBanner" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px"></div>
   <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
+    <button class="btn btn-sm" onclick="refreshSelectedTokens()" title="${t('在后台刷新选中账号的 Token')}">${t('刷新 Token')}</button>
+    <button class="btn btn-sm" onclick="detectSelectedAccounts()" title="${t('在后台检测选中账号（含邮件数统计）')}">${t('检测选中')}</button>
     <button class="btn btn-sm" onclick="batchAction('move')">${t('移动分组')}</button>
     <button class="btn btn-sm" onclick="batchAction('enable')">${t('批量启用')}</button>
     <button class="btn btn-sm" onclick="batchAction('disable')">${t('批量停用')}</button>
@@ -616,17 +618,35 @@ async function detectCurrentScope() {
   if (!count) { toast(t('当前筛选下没有账号'), 'error'); return; }
   if (!confirm(t('将在后台检测「{scope}」下的 {n} 个邮箱，关闭页面也会继续，可随时停止。失效邮箱会按设置自动删除，确认？', { scope, n: count }))) return;
 
-  const res = await api('/accounts/detect/start', {
-    method: 'POST',
-    body: JSON.stringify({
-      group_id: groupSel?.value || null,
-      status: statusSel?.value || null,
-      tag_id: tagSel?.value || null,
-      label: scope,
-    }),
+  await startBackgroundJob({
+    kind: 'detect',
+    group_id: groupSel?.value || null,
+    status: statusSel?.value || null,
+    tag_id: tagSel?.value || null,
+    label: scope,
   });
+}
+
+// Batch-bar actions: run over the checked rows (selection survives page turns)
+async function refreshSelectedTokens() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast(t('请先选择账号'), 'error'); return; }
+  if (!confirm(t('将在后台刷新选中的 {n} 个账号的 Token，关闭页面也会继续。失效邮箱会按设置自动删除，确认？', { n: ids.length }))) return;
+  await startBackgroundJob({ kind: 'refresh', ids, label: t('选中 {n} 个', { n: ids.length }) });
+}
+
+async function detectSelectedAccounts() {
+  const ids = [...selectedAccountIds];
+  if (!ids.length) { toast(t('请先选择账号'), 'error'); return; }
+  if (!confirm(t('将在后台检测选中的 {n} 个邮箱，关闭页面也会继续。失效邮箱会按设置自动删除，确认？', { n: ids.length }))) return;
+  await startBackgroundJob({ kind: 'detect', ids, label: t('选中 {n} 个', { n: ids.length }) });
+}
+
+async function startBackgroundJob(payload) {
+  const res = await api('/accounts/detect/start', { method: 'POST', body: JSON.stringify(payload) });
   if (!res?.success) { toast(res?.error?.message || t('启动失败'), 'error'); return; }
-  toast(res.message || t('已在后台开始检测'));
+  toast(res.message || t('已在后台开始'), 'success', 5000);
+  if (payload.ids) clearSelection();
   renderDetectBanner(res.data);
   startDetectPolling();
 }
@@ -669,13 +689,19 @@ function renderDetectBanner(job) {
 
   const active = job.state === 'running' || job.state === 'stopping';
   const pct = job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
-  const stateLabel = { running: t('检测中'), stopping: t('正在停止...'), stopped: t('已停止'), done: t('检测完成') }[job.state] || job.state;
+  const isRefresh = job.kind === 'refresh';
+  const stateLabel = {
+    running: isRefresh ? t('刷新中') : t('检测中'),
+    stopping: t('正在停止...'),
+    stopped: t('已停止'),
+    done: isRefresh ? t('刷新完成') : t('检测完成'),
+  }[job.state] || job.state;
   host.style.display = '';
   host.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px">
-      <b>${esc(job.scope_label || t('全部分组'))}</b>
+      <b>${isRefresh ? t('刷新 Token') : t('检测')} · ${esc(job.scope_label || t('全部分组'))}</b>
       <span style="color:var(--text-muted)">${stateLabel} ${job.processed}/${job.total}（${pct}%）</span>
-      <span style="color:var(--success)">${t('正常 {n}', { n: job.connected })}</span>
+      <span style="color:var(--success)">${isRefresh ? t('成功 {n}', { n: job.connected }) : t('正常 {n}', { n: job.connected })}</span>
       <span style="color:var(--danger)">${t('失败 {n}', { n: job.failed })}</span>
       <span style="color:var(--text-muted)">${t('已删除 {n}', { n: job.deleted })}</span>
       ${job.last_email ? `<span style="color:var(--text-dim)">${esc(job.last_email)}</span>` : ''}

@@ -8,6 +8,7 @@ import {
   probeAccount,
   publicProbeResult,
   persistProbeResults,
+  refreshAccountToken,
   mapWithConcurrency,
   PROBE_CONCURRENCY,
 } from '../probe';
@@ -23,6 +24,8 @@ const accounts = new Hono<{ Bindings: Env }>();
 const MAX_CONNECTION_TESTS_PER_REQUEST = 10;
 // One page of the account list; each account costs a token call plus a folder call.
 const MAX_INBOX_COUNTS_PER_REQUEST = 20;
+// Guard rail for selection-based background jobs (the id list is stored as JSON)
+const MAX_SELECTED_JOB_ACCOUNTS = 20000;
 
 // Mask account for list responses
 function safeAccount(acc: AccountRow) {
@@ -265,27 +268,7 @@ accounts.post('/batch', async (c) => {
         results.push({ id, email: '', refreshed: false, error: { code: 'NOT_FOUND', message: '账号不存在' } });
         continue;
       }
-      const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
-      if (!tokenResult.token) {
-        // Permanently dead refresh token: drop the account instead of parking it
-        // in "error" forever (opt out via the token_refresh_delete_invalid setting).
-        if (deleteInvalid && isPermanentTokenFailure(tokenResult.error)) {
-          await run(c.env.DB, 'DELETE FROM account_tags WHERE account_id = ?', [id]);
-          await run(c.env.DB, 'DELETE FROM accounts WHERE id = ?', [id]);
-          results.push({ id, email: account.email, refreshed: false, deleted: true, error: tokenResult.error });
-          continue;
-        }
-        await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['error', id]);
-        results.push({ id, email: account.email, refreshed: false, error: tokenResult.error });
-        continue;
-      }
-      const rotated = Boolean(tokenResult.newRefreshToken && tokenResult.newRefreshToken !== account.refresh_token);
-      if (rotated) {
-        await run(c.env.DB, 'UPDATE accounts SET refresh_token = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [tokenResult.newRefreshToken, 'active', id]);
-      } else {
-        await run(c.env.DB, 'UPDATE accounts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['active', id]);
-      }
-      results.push({ id, email: account.email, refreshed: true, rotated });
+      results.push(await refreshAccountToken(c.env.DB, account, deleteInvalid));
     }
 
     const refreshed = results.filter((result) => result.refreshed).length;
@@ -447,6 +430,8 @@ accounts.post('/batch', async (c) => {
 // POST /api/accounts/detect/start — probe every account in the given scope
 accounts.post('/detect/start', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
+    kind?: string;
+    ids?: number[];
     group_id?: number | string;
     status?: string;
     tag_id?: number | string;
@@ -457,14 +442,22 @@ accounts.post('/detect/start', async (c) => {
     return Number.isInteger(n) && (n as number) > 0 ? (n as number) : null;
   };
   const status = ['active', 'error', 'disabled'].includes(String(body.status)) ? String(body.status) : null;
+  const kind = body.kind === 'refresh' ? 'refresh' : 'detect';
+  const ids = Array.isArray(body.ids) ? body.ids.filter((id) => Number.isInteger(id) && id > 0) : [];
+  if (ids.length > MAX_SELECTED_JOB_ACCOUNTS) {
+    return badRequest(`单个任务最多 ${MAX_SELECTED_JOB_ACCOUNTS} 个账号，请分批操作`);
+  }
 
   const { job, created } = await startDetectJob(c.env.DB, {
+    kind,
+    ids,
     group_id: toId(body.group_id),
     status,
     tag_id: toId(body.tag_id),
     label: typeof body.label === 'string' ? body.label.slice(0, 100) : '',
   });
-  if (!created) return ok(job, '已有检测任务在运行，返回当前任务');
+  const noun = kind === 'refresh' ? '刷新' : '检测';
+  if (!created) return ok(job, `已有${job.kind === 'refresh' ? '刷新' : '检测'}任务在运行，返回当前任务`);
   if (!job.total) return ok(job, '该范围内没有账号');
 
   // Kick the first batch immediately so the UI shows progress right away; the
@@ -476,7 +469,7 @@ accounts.post('/detect/start', async (c) => {
   } catch {
     // No ExecutionContext bound (Node server, tests) — the promise runs on its own
   }
-  return ok(job, `已在后台开始检测 ${job.total} 个邮箱`);
+  return ok(job, `已在后台开始${noun} ${job.total} 个邮箱`);
 });
 
 // GET /api/accounts/detect/status — latest job (running or finished)

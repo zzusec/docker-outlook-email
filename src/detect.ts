@@ -4,14 +4,26 @@
 // repeatedly calls advanceDetectJob() to process one batch at a time.
 import type { Env, AccountRow } from './types';
 import { query, first, run, getSetting } from './db';
-import { probeAccount, persistProbeResults, mapWithConcurrency, PROBE_CONCURRENCY } from './probe';
+import {
+  probeAccount,
+  persistProbeResults,
+  refreshAccountToken,
+  mapWithConcurrency,
+  PROBE_CONCURRENCY,
+} from './probe';
 
 // Accounts per batch. Small batches keep the Workers subrequest budget in reach
 // and let a stop request take effect quickly.
 export const DETECT_BATCH = 10;
 
+// detect  — full probe: token + mail access + Inbox count
+// refresh — token refresh only, over a hand-picked selection
+export type DetectJobKind = 'detect' | 'refresh';
+
 export interface DetectJobRow {
   id: number;
+  kind: DetectJobKind;
+  scope_ids: string;
   scope_group_id: number | null;
   scope_status: string | null;
   scope_tag_id: number | null;
@@ -31,10 +43,24 @@ export interface DetectJobRow {
 }
 
 export interface DetectScope {
+  kind?: DetectJobKind;
+  ids?: number[] | null;
   group_id?: number | null;
   status?: string | null;
   tag_id?: number | null;
   label?: string;
+}
+
+// Explicit selections are stored as a JSON id list; cursor_id then counts how
+// many of those ids have been handled (an id cursor would not survive gaps).
+function parseScopeIds(job: Pick<DetectJobRow, 'scope_ids'>): number[] {
+  if (!job.scope_ids) return [];
+  try {
+    const parsed = JSON.parse(job.scope_ids) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is number => Number.isInteger(v)) : [];
+  } catch {
+    return [];
+  }
 }
 
 // Build the WHERE clause shared by the initial COUNT and every batch fetch.
@@ -77,25 +103,32 @@ export async function startDetectJob(
   const existing = await getActiveDetectJob(db);
   if (existing) return { job: existing, created: false };
 
-  const groupId = scope.group_id && scope.group_id > 0 ? scope.group_id : null;
-  const tagId = scope.tag_id && scope.tag_id > 0 ? scope.tag_id : null;
-  const status = scope.status || null;
-  const { joins, where, params } = scopeQuery({
-    scope_group_id: groupId,
-    scope_status: status,
-    scope_tag_id: tagId,
-  });
-  const countRow = await first<{ n: number }>(
-    db,
-    `SELECT COUNT(*) AS n FROM accounts a${joins}${where}`,
-    params
-  );
+  const kind: DetectJobKind = scope.kind === 'refresh' ? 'refresh' : 'detect';
+  const ids = [...new Set((scope.ids ?? []).filter((id) => Number.isInteger(id) && id > 0))];
+  const groupId = !ids.length && scope.group_id && scope.group_id > 0 ? scope.group_id : null;
+  const tagId = !ids.length && scope.tag_id && scope.tag_id > 0 ? scope.tag_id : null;
+  const status = !ids.length ? scope.status || null : null;
+
+  let total = ids.length;
+  if (!ids.length) {
+    const { joins, where, params } = scopeQuery({
+      scope_group_id: groupId,
+      scope_status: status,
+      scope_tag_id: tagId,
+    });
+    const countRow = await first<{ n: number }>(
+      db,
+      `SELECT COUNT(*) AS n FROM accounts a${joins}${where}`,
+      params
+    );
+    total = countRow?.n ?? 0;
+  }
 
   await run(
     db,
-    `INSERT INTO detect_jobs (scope_group_id, scope_status, scope_tag_id, scope_label, total)
-     VALUES (?, ?, ?, ?, ?)`,
-    [groupId, status, tagId, scope.label ?? '', countRow?.n ?? 0]
+    `INSERT INTO detect_jobs (kind, scope_ids, scope_group_id, scope_status, scope_tag_id, scope_label, total)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [kind, ids.length ? JSON.stringify(ids) : '', groupId, status, tagId, scope.label ?? '', total]
   );
   const job = await getLatestDetectJob(db);
   return { job: job as DetectJobRow, created: true };
@@ -133,26 +166,70 @@ export async function advanceDetectJob(env: Env): Promise<string> {
 
   if (job.state === 'stopping') return settle('stopped');
 
-  const { joins, where, params } = scopeQuery(job);
-  const cursorClause = where ? `${where} AND a.id > ?` : ' WHERE a.id > ?';
-  const accounts = await query<AccountRow>(
-    db,
-    `SELECT a.* FROM accounts a${joins}${cursorClause} ORDER BY a.id ASC LIMIT ?`,
-    [...params, job.cursor_id, DETECT_BATCH]
-  );
-  if (!accounts.length) return settle('done');
+  const selectedIds = parseScopeIds(job);
+  let accounts: AccountRow[];
+  let nextCursor: number;
 
-  const probes = await mapWithConcurrency(accounts, PROBE_CONCURRENCY, async (account) => ({
-    account,
-    result: await probeAccount(account),
-  }));
+  if (selectedIds.length) {
+    // Explicit selection: cursor_id is an index into the stored id list
+    const slice = selectedIds.slice(job.cursor_id, job.cursor_id + DETECT_BATCH);
+    if (!slice.length) return settle('done');
+    nextCursor = job.cursor_id + slice.length;
+    // Rows may have been deleted meanwhile; those ids simply drop out
+    accounts = await query<AccountRow>(
+      db,
+      `SELECT a.* FROM accounts a WHERE a.id IN (${slice.map(() => '?').join(',')}) ORDER BY a.id ASC`,
+      slice
+    );
+    if (!accounts.length) {
+      await run(
+        db,
+        `UPDATE detect_jobs SET cursor_id = ?, processed = processed + ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [nextCursor, slice.length, job.id]
+      );
+      return `batch: skipped ${slice.length} missing (${job.processed + slice.length}/${job.total})`;
+    }
+  } else {
+    const { joins, where, params } = scopeQuery(job);
+    const cursorClause = where ? `${where} AND a.id > ?` : ' WHERE a.id > ?';
+    accounts = await query<AccountRow>(
+      db,
+      `SELECT a.* FROM accounts a${joins}${cursorClause} ORDER BY a.id ASC LIMIT ?`,
+      [...params, job.cursor_id, DETECT_BATCH]
+    );
+    if (!accounts.length) return settle('done');
+    nextCursor = accounts[accounts.length - 1].id;
+  }
+
   const deleteInvalid = (await getSetting(db, 'token_refresh_delete_invalid')) !== '0';
-  const deletedIds = await persistProbeResults(db, probes, deleteInvalid);
+  let succeeded = 0;
+  let deletedCount = 0;
+  let lastError: { code: string; message: string } | undefined;
 
-  const connected = probes.filter(({ result }) => result.connected).length;
-  const failed = probes.length - connected - deletedIds.length;
+  if (job.kind === 'refresh') {
+    const outcomes = await mapWithConcurrency(accounts, PROBE_CONCURRENCY, (account) =>
+      refreshAccountToken(db, account, deleteInvalid)
+    );
+    succeeded = outcomes.filter((outcome) => outcome.refreshed).length;
+    deletedCount = outcomes.filter((outcome) => outcome.deleted).length;
+    lastError = outcomes.find((outcome) => outcome.error)?.error;
+  } else {
+    const probes = await mapWithConcurrency(accounts, PROBE_CONCURRENCY, async (account) => ({
+      account,
+      result: await probeAccount(account),
+    }));
+    const deletedIds = await persistProbeResults(db, probes, deleteInvalid);
+    succeeded = probes.filter(({ result }) => result.connected).length;
+    deletedCount = deletedIds.length;
+    lastError = probes.find(({ result }) => result.error)?.result.error;
+  }
+
+  const processedNow = selectedIds.length
+    ? Math.min(DETECT_BATCH, selectedIds.length - job.cursor_id)
+    : accounts.length;
+  const failed = accounts.length - succeeded - deletedCount;
   const lastAccount = accounts[accounts.length - 1];
-  const lastError = probes.find(({ result }) => result.error)?.result.error;
 
   await run(
     db,
@@ -160,16 +237,16 @@ export async function advanceDetectJob(env: Env): Promise<string> {
      failed = failed + ?, deleted = deleted + ?, last_email = ?, last_error = ?,
      updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [
-      lastAccount.id,
-      accounts.length,
-      connected,
+      nextCursor,
+      processedNow,
+      succeeded,
       failed,
-      deletedIds.length,
+      deletedCount,
       lastAccount.email,
       lastError ? `${lastError.code}: ${lastError.message}`.slice(0, 200) : '',
       job.id,
     ]
   );
 
-  return `batch: +${accounts.length} (${job.processed + accounts.length}/${job.total})`;
+  return `batch: +${processedNow} (${job.processed + processedNow}/${job.total})`;
 }

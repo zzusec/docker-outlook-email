@@ -141,6 +141,50 @@ describe('background detection job', () => {
   });
 });
 
+describe('background refresh job (selected accounts)', () => {
+  it('refreshes only the picked ids and saves rotated tokens', async () => {
+    const db = createDatabase();
+    await seedAccounts(db, [
+      { email: 'pick1@x.c', group: 1 },
+      { email: 'skip@x.c', group: 1 },
+      { email: 'pick2@x.c', group: 2 },
+    ]);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      access_token: 'at',
+      refresh_token: 'rt-rotated',
+      scope: 'https://graph.microsoft.com/Mail.ReadWrite offline_access',
+    }))));
+
+    const { job } = await startDetectJob(db, { kind: 'refresh', ids: [1, 3], label: '选中 2 个' });
+    expect(job.kind).toBe('refresh');
+    expect(job.total).toBe(2);
+
+    await advanceDetectJob({ DB: db } as any);
+    const finished = (await getLatestDetectJob(db)) as DetectJobRow;
+    expect(finished.processed).toBe(2);
+    expect(finished.connected).toBe(2);
+
+    const rows = await query<{ email: string; refresh_token: string; inbox_total: number | null }>(
+      db, 'SELECT email, refresh_token, inbox_total FROM accounts ORDER BY id'
+    );
+    expect(rows.map((row) => row.refresh_token)).toEqual(['rt-rotated', 'rt', 'rt-rotated']);
+    // A refresh job must not spend calls on Inbox counts
+    expect(rows.every((row) => row.inbox_total === null)).toBe(true);
+  });
+
+  it('keeps counting progress when a selected account was deleted meanwhile', async () => {
+    const db = createDatabase();
+    await seedAccounts(db, [{ email: 'gone@x.c', group: 1 }]);
+    await run(db, 'DELETE FROM accounts WHERE id = 1');
+    stubHealthyMailbox();
+
+    await startDetectJob(db, { kind: 'refresh', ids: [1] });
+    expect(await advanceDetectJob({ DB: db } as any)).toContain('skipped');
+    expect(await advanceDetectJob({ DB: db } as any)).toContain('done');
+    expect(((await getLatestDetectJob(db)) as DetectJobRow).processed).toBe(1);
+  });
+});
+
 describe('detect routes', () => {
   it('routes /detect/* without colliding with /:id handlers', async () => {
     const db = createDatabase();

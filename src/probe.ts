@@ -168,3 +168,54 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runWorker));
   return results;
 }
+
+export interface TokenRefreshOutcome {
+  id: number;
+  email: string;
+  refreshed: boolean;
+  rotated: boolean;
+  deleted: boolean;
+  error?: GraphError;
+}
+
+// Refresh one account's token and persist the outcome. Shared by the immediate
+// batch endpoint and the background refresh job so both behave identically:
+// a rotated refresh_token is always saved, a permanently dead one deletes the
+// account (when enabled), anything else just marks the account as error.
+export async function refreshAccountToken(
+  db: D1Database,
+  account: AccountRow,
+  deleteInvalid: boolean
+): Promise<TokenRefreshOutcome> {
+  const base = { id: account.id, email: account.email };
+  const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
+
+  if (!tokenResult.token) {
+    if (deleteInvalid && isPermanentTokenFailure(tokenResult.error)) {
+      await batchRun(db, [
+        { sql: 'DELETE FROM account_tags WHERE account_id = ?', params: [account.id] },
+        { sql: 'DELETE FROM accounts WHERE id = ?', params: [account.id] },
+      ]);
+      return { ...base, refreshed: false, rotated: false, deleted: true, error: tokenResult.error };
+    }
+    await batchRun(db, [{
+      sql: "UPDATE accounts SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      params: [account.id],
+    }]);
+    return { ...base, refreshed: false, rotated: false, deleted: false, error: tokenResult.error };
+  }
+
+  const rotated = Boolean(tokenResult.newRefreshToken && tokenResult.newRefreshToken !== account.refresh_token);
+  await batchRun(db, [
+    rotated
+      ? {
+          sql: "UPDATE accounts SET refresh_token = ?, status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          params: [tokenResult.newRefreshToken, account.id],
+        }
+      : {
+          sql: "UPDATE accounts SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          params: [account.id],
+        },
+  ]);
+  return { ...base, refreshed: true, rotated, deleted: false };
+}
