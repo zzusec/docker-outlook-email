@@ -28,15 +28,31 @@ external.use('*', async (c, next) => {
 
 // GET /api/external/accounts - 获取所有邮箱列表
 external.get('/accounts', async (c) => {
-  const rows = await query<AccountRow>(
-    c.env.DB,
-    `SELECT id, email, status, remark, created_at FROM accounts WHERE status != 'disabled' ORDER BY email`,
-    []
-  );
+  const country = c.req.query('country')?.trim() || '';
+  const ipType = c.req.query('ip_type')?.trim() || '';
+
+  let sql = `SELECT id, email, status, remark, country, ip_type, created_at FROM accounts WHERE status != 'disabled'`;
+  const params: string[] = [];
+
+  if (country) {
+    sql += ' AND country = ?';
+    params.push(country);
+  }
+
+  if (ipType) {
+    sql += ' AND ip_type = ?';
+    params.push(ipType);
+  }
+
+  sql += ' ORDER BY email';
+
+  const rows = await query<AccountRow>(c.env.DB, sql, params);
   const items = rows.map((r) => ({
     email: r.email,
     status: r.status,
     remark: r.remark || '',
+    country: r.country || '',
+    ip_type: r.ip_type || '',
   }));
   return ok({ count: items.length, items });
 });

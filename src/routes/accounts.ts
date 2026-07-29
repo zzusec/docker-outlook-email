@@ -160,6 +160,8 @@ function safeAccount(acc: AccountRow) {
     group_id: acc.group_id,
     remark: acc.remark,
     status: acc.status,
+    country: acc.country,
+    ip_type: acc.ip_type,
     inbox: {
       total: acc.inbox_total ?? null,
       checked_at: acc.inbox_count_updated_at ?? null,
@@ -245,6 +247,8 @@ accounts.post('/', async (c) => {
     password?: string;
     group_id?: number;
     remark?: string;
+    country?: string;
+    ip_type?: string;
   };
 
   const groupId = body.group_id ?? 1;
@@ -290,8 +294,8 @@ accounts.post('/', async (c) => {
   try {
     const result = await run(
       c.env.DB,
-      'INSERT INTO accounts (email, password, client_id, refresh_token, group_id, remark) VALUES (?, ?, ?, ?, ?, ?)',
-      [email, body.password ?? '', clientId, refreshToken, groupId, body.remark ?? '']
+      'INSERT INTO accounts (email, password, client_id, refresh_token, group_id, remark, country, ip_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [email, body.password ?? '', clientId, refreshToken, groupId, body.remark ?? '', body.country ?? '', body.ip_type ?? '']
     );
     return ok({ id: result.meta.last_row_id }, '账号添加成功');
   } catch {
@@ -580,6 +584,8 @@ accounts.put('/:id', async (c) => {
     group_id: number;
     remark: string;
     status: string;
+    country: string;
+    ip_type: string;
     tag_ids: number[];
   }>;
 
@@ -623,7 +629,7 @@ accounts.put('/:id', async (c) => {
     await run(
       c.env.DB,
       `UPDATE accounts SET email = ?, password = ?, client_id = ?, refresh_token = ?,
-       group_id = ?, remark = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       group_id = ?, remark = ?, status = ?, country = ?, ip_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [
         email,
         body.password ?? existing.password,
@@ -632,6 +638,8 @@ accounts.put('/:id', async (c) => {
         body.group_id ?? existing.group_id,
         body.remark ?? existing.remark,
         status,
+        body.country ?? existing.country,
+        body.ip_type ?? existing.ip_type,
         id,
       ]
     );

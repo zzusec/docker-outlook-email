@@ -804,6 +804,40 @@ function showAddAccountModal() {
     <div class="form-group"><label class="form-label">Refresh Token</label><textarea class="form-textarea" id="mAccToken" rows="3"></textarea></div>
     <div class="form-group"><label class="form-label">${t('密码 (可选)')}</label><input class="form-input" id="mAccPwd"></div>
     <div class="form-group"><label class="form-label">${t('分组')}</label><select class="form-select" id="mAccGroup">${state.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">${t('国家')}</label>
+      <select class="form-select" id="mAccCountry">
+        <option value="">${t('请选择')}</option>
+        <option value="US">美国 (US)</option>
+        <option value="UK">英国 (UK)</option>
+        <option value="CA">加拿大 (CA)</option>
+        <option value="AU">澳大利亚 (AU)</option>
+        <option value="DE">德国 (DE)</option>
+        <option value="FR">法国 (FR)</option>
+        <option value="JP">日本 (JP)</option>
+        <option value="KR">韩国 (KR)</option>
+        <option value="SG">新加坡 (SG)</option>
+        <option value="HK">香港 (HK)</option>
+        <option value="TW">台湾 (TW)</option>
+        <option value="BR">巴西 (BR)</option>
+        <option value="IN">印度 (IN)</option>
+        <option value="MX">墨西哥 (MX)</option>
+        <option value="NL">荷兰 (NL)</option>
+        <option value="ES">西班牙 (ES)</option>
+        <option value="IT">意大利 (IT)</option>
+        <option value="RU">俄罗斯 (RU)</option>
+        <option value="ZA">南非 (ZA)</option>
+        <option value="AE">阿联酋 (AE)</option>
+        <option value="OTHER">${t('其他')}</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">${t('IP类型')}</label>
+      <select class="form-select" id="mAccIpType">
+        <option value="">${t('请选择')}</option>
+        <option value="residential">${t('住宅IP')}</option>
+        <option value="native">${t('原生IP')}</option>
+        <option value="datacenter">${t('机房IP')}</option>
+      </select>
+    </div>
     <div class="form-group"><label class="form-label">${t('备注')}</label><input class="form-input" id="mAccRemark"></div>
   `, async () => {
     const body = {
@@ -812,6 +846,8 @@ function showAddAccountModal() {
       refresh_token: document.getElementById('mAccToken').value.trim(),
       password: document.getElementById('mAccPwd').value,
       group_id: parseInt(document.getElementById('mAccGroup').value),
+      country: document.getElementById('mAccCountry').value,
+      ip_type: document.getElementById('mAccIpType').value,
       remark: document.getElementById('mAccRemark').value,
     };
     if (!body.email || !body.client_id || !body.refresh_token) {
@@ -963,6 +999,40 @@ async function showEditAccountModal(id) {
     </div>
     <div class="form-group"><label class="form-label">${t('密码')}</label><input class="form-input" id="mAccPwd" value="${esc(a.password || '')}"></div>
     <div class="form-group"><label class="form-label">${t('分组')}</label><select class="form-select" id="mAccGroup">${state.groups.map(g => `<option value="${g.id}" ${g.id === a.group_id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">${t('国家')}</label>
+      <select class="form-select" id="mAccCountry">
+        <option value="">${t('请选择')}</option>
+        <option value="US" ${a.country === 'US' ? 'selected' : ''}>美国 (US)</option>
+        <option value="UK" ${a.country === 'UK' ? 'selected' : ''}>英国 (UK)</option>
+        <option value="CA" ${a.country === 'CA' ? 'selected' : ''}>加拿大 (CA)</option>
+        <option value="AU" ${a.country === 'AU' ? 'selected' : ''}>澳大利亚 (AU)</option>
+        <option value="DE" ${a.country === 'DE' ? 'selected' : ''}>德国 (DE)</option>
+        <option value="FR" ${a.country === 'FR' ? 'selected' : ''}>法国 (FR)</option>
+        <option value="JP" ${a.country === 'JP' ? 'selected' : ''}>日本 (JP)</option>
+        <option value="KR" ${a.country === 'KR' ? 'selected' : ''}>韩国 (KR)</option>
+        <option value="SG" ${a.country === 'SG' ? 'selected' : ''}>新加坡 (SG)</option>
+        <option value="HK" ${a.country === 'HK' ? 'selected' : ''}>香港 (HK)</option>
+        <option value="TW" ${a.country === 'TW' ? 'selected' : ''}>台湾 (TW)</option>
+        <option value="BR" ${a.country === 'BR' ? 'selected' : ''}>巴西 (BR)</option>
+        <option value="IN" ${a.country === 'IN' ? 'selected' : ''}>印度 (IN)</option>
+        <option value="MX" ${a.country === 'MX' ? 'selected' : ''}>墨西哥 (MX)</option>
+        <option value="NL" ${a.country === 'NL' ? 'selected' : ''}>荷兰 (NL)</option>
+        <option value="ES" ${a.country === 'ES' ? 'selected' : ''}>西班牙 (ES)</option>
+        <option value="IT" ${a.country === 'IT' ? 'selected' : ''}>意大利 (IT)</option>
+        <option value="RU" ${a.country === 'RU' ? 'selected' : ''}>俄罗斯 (RU)</option>
+        <option value="ZA" ${a.country === 'ZA' ? 'selected' : ''}>南非 (ZA)</option>
+        <option value="AE" ${a.country === 'AE' ? 'selected' : ''}>阿联酋 (AE)</option>
+        <option value="OTHER" ${a.country === 'OTHER' ? 'selected' : ''}>${t('其他')}</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">${t('IP类型')}</label>
+      <select class="form-select" id="mAccIpType">
+        <option value="">${t('请选择')}</option>
+        <option value="residential" ${a.ip_type === 'residential' ? 'selected' : ''}>${t('住宅IP')}</option>
+        <option value="native" ${a.ip_type === 'native' ? 'selected' : ''}>${t('原生IP')}</option>
+        <option value="datacenter" ${a.ip_type === 'datacenter' ? 'selected' : ''}>${t('机房IP')}</option>
+      </select>
+    </div>
     <div class="form-group"><label class="form-label">${t('备注')}</label><input class="form-input" id="mAccRemark" value="${esc(a.remark)}"></div>
     <div class="form-group"><label class="form-label">${t('标签')}</label>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -976,6 +1046,8 @@ async function showEditAccountModal(id) {
       email: document.getElementById('mAccEmail').value.trim(),
       client_id: document.getElementById('mAccClientId').value.trim(),
       group_id: parseInt(document.getElementById('mAccGroup').value),
+      country: document.getElementById('mAccCountry').value,
+      ip_type: document.getElementById('mAccIpType').value,
       remark: document.getElementById('mAccRemark').value,
       tag_ids: [...document.querySelectorAll('.acc-tag-check:checked')].map(c => parseInt(c.value)),
     };

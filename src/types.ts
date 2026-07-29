@@ -33,6 +33,8 @@ export interface AccountRow {
   group_id: number;
   remark: string;
   status: string;
+  country: string;
+  ip_type: string;
   inbox_total: number | null;
   inbox_count_updated_at: string | null;
   created_at: string;

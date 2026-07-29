@@ -18,9 +18,14 @@
 GET /api/external/accounts
 ```
 
-返回所有可用邮箱账号列表。
+返回所有可用邮箱账号列表，支持按国家和IP类型筛选。
 
-**参数**：无
+**参数**：
+
+| 参数 | 必填 | 说明 |
+|------|:----:|------|
+| `country` | ❌ | 国家代码筛选（如 US、UK、CA 等） |
+| `ip_type` | ❌ | IP类型筛选（`residential`住宅IP / `native`原生IP / `datacenter`机房IP） |
 
 **返回示例**：
 
@@ -30,11 +35,21 @@ GET /api/external/accounts
   "data": {
     "count": 100,
     "items": [
-      { "email": "abc@outlook.com", "status": "active", "remark": "" },
-      { "email": "test@hotmail.com", "status": "active", "remark": "测试账号" }
+      { "email": "abc@outlook.com", "status": "active", "remark": "", "country": "US", "ip_type": "residential" },
+      { "email": "test@hotmail.com", "status": "active", "remark": "测试账号", "country": "UK", "ip_type": "native" }
     ]
   }
 }
+```
+
+**筛选示例**：
+
+```bash
+# 获取美国住宅IP的邮箱列表
+curl "https://你的域名/api/external/accounts?key=你的Key&country=US&ip_type=residential"
+
+# 获取所有英国邮箱
+curl "https://你的域名/api/external/accounts?key=你的Key&country=UK"
 ```
 
 ### 获取邮件列表
