@@ -31,6 +31,7 @@ describe('SQLite D1 compatibility layer', () => {
       '0003_push_state.sql',
       '0004_inbox_counts.sql',
       '0007_add_country.sql',
+      '0008_detect_jobs.sql',
     ]);
     expect(applyMigrations(db, resolve('migrations'))).toEqual([]);
 

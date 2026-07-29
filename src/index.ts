@@ -3,6 +3,7 @@ import type { Env } from './types';
 import { authMiddleware } from './auth';
 import { fail } from './response';
 import { runTokenRefresh, runEmailPush } from './cron';
+import { advanceDetectJob } from './detect';
 import authRoutes from './routes/auth';
 import groupRoutes from './routes/groups';
 import accountRoutes from './routes/accounts';
@@ -76,6 +77,9 @@ export default {
       (async () => {
         await runTokenRefresh(env);
         await runEmailPush(env);
+        // On Workers there is no long-lived process, so a background detection
+        // job advances one batch per cron tick.
+        await advanceDetectJob(env);
       })()
     );
   },

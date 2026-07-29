@@ -457,6 +457,7 @@ async function renderAccounts(el) {
     <button class="btn btn-sm" onclick="detectCurrentScope()" title="${t('按当前筛选（分组/状态/标签）逐批检测所有邮箱')}">${t('检测当前分组')}</button>
     <button class="btn btn-sm" onclick="exportAccounts()">${t('导出全部')}</button>
   </div>
+  <div id="detectBanner" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px"></div>
   <div id="batchBar" style="display:none;margin-top:10px;padding:10px 14px;background:var(--primary-bg);border:1px solid var(--border-focus);border-radius:8px;align-items:center;gap:8px;font-size:13px">
     <span id="batchCount" style="color:var(--primary)"></span>
     <button class="btn btn-sm" onclick="batchAction('move')">${t('移动分组')}</button>
@@ -497,6 +498,8 @@ async function renderAccounts(el) {
   </div>`;
 
   setAccountsView(state.accounts);
+  // A detection job may already be running (other tab, or before a reload)
+  resumeDetectJob();
 
   // Apply a status filter requested from the dashboard cards (活跃 / 异常)
   if (state.pendingAccountStatus) {
@@ -599,82 +602,108 @@ async function hydrateInboxCounts(pageAccounts, opts) {
   }
 }
 
-// ---- Whole-scope detection (current group / status / tag filter) ----
-// Runs the same probe as "测试" (token + mail access + Inbox count) over every
-// account in the current view, 10 at a time — the per-request server cap.
-var DETECT_CHUNK = 10;
-var detectStop = false;
+// ---- Whole-scope detection, run in the background by the server ----
+// The browser only starts the job and polls its progress: closing the tab (or
+// logging out) does not stop it, and reopening the page picks the job back up.
+var detectPollTimer = null;
 
 async function detectCurrentScope() {
-  const targets = accountsView.slice();
-  if (!targets.length) { toast(t('当前筛选下没有账号'), 'error'); return; }
-  const sel = document.getElementById('accountGroupFilter');
-  const scope = sel && sel.value ? sel.options[sel.selectedIndex].text : t('全部分组');
-  if (!confirm(t('将检测「{scope}」下的 {n} 个邮箱，可随时停止。失效邮箱会按设置自动删除，确认？', { scope, n: targets.length }))) return;
+  const groupSel = document.getElementById('accountGroupFilter');
+  const statusSel = document.getElementById('accountStatusFilter');
+  const tagSel = document.getElementById('accountTagFilter');
+  const scope = groupSel && groupSel.value ? groupSel.options[groupSel.selectedIndex].text : t('全部分组');
+  const count = accountsView.length;
+  if (!count) { toast(t('当前筛选下没有账号'), 'error'); return; }
+  if (!confirm(t('将在后台检测「{scope}」下的 {n} 个邮箱，关闭页面也会继续，可随时停止。失效邮箱会按设置自动删除，确认？', { scope, n: count }))) return;
 
-  detectStop = false;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-    <div class="modal">
-      <div class="modal-header"><h3>${t('批量检测')}</h3></div>
-      <div class="modal-body">
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">${esc(scope)} · ${t('共 {n} 个', { n: targets.length })}</div>
-        <div style="height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden;margin-bottom:10px">
-          <div id="detectBar" style="height:100%;width:0;background:var(--primary);transition:width .2s"></div>
-        </div>
-        <div id="detectStat" style="font-size:13px"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" id="detectStopBtn">${t('停止')}</button>
-        <button class="btn btn-primary" id="detectCloseBtn" style="display:none">${t('完成')}</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  const bar = overlay.querySelector('#detectBar');
-  const stat = overlay.querySelector('#detectStat');
-  const stopBtn = overlay.querySelector('#detectStopBtn');
-  const closeBtn = overlay.querySelector('#detectCloseBtn');
-  stopBtn.onclick = () => { detectStop = true; stopBtn.disabled = true; stopBtn.textContent = t('正在停止...'); };
-  closeBtn.onclick = () => { overlay.remove(); navigate('accounts'); };
+  const res = await api('/accounts/detect/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      group_id: groupSel?.value || null,
+      status: statusSel?.value || null,
+      tag_id: tagSel?.value || null,
+      label: scope,
+    }),
+  });
+  if (!res?.success) { toast(res?.error?.message || t('启动失败'), 'error'); return; }
+  toast(res.message || t('已在后台开始检测'));
+  renderDetectBanner(res.data);
+  startDetectPolling();
+}
 
-  let done = 0, connected = 0, failed = 0, removed = 0;
-  const paint = () => {
-    bar.style.width = Math.round((done / targets.length) * 100) + '%';
-    stat.innerHTML = `${t('已检测 {n}', { n: done })} / ${targets.length} ·
-      <span style="color:var(--success)">${t('正常 {n}', { n: connected })}</span> ·
-      <span style="color:var(--danger)">${t('失败 {n}', { n: failed })}</span> ·
-      <span style="color:var(--text-muted)">${t('已删除 {n}', { n: removed })}</span>`;
-  };
-  paint();
+async function stopDetectJob() {
+  if (!confirm(t('确认停止后台检测？已检测的结果会保留。'))) return;
+  const res = await api('/accounts/detect/stop', { method: 'POST' });
+  if (res?.success) { toast(res.message || t('已停止')); renderDetectBanner(res.data); }
+  else toast(res?.error?.message || t('操作失败'), 'error');
+}
 
-  for (let i = 0; i < targets.length && !detectStop; i += DETECT_CHUNK) {
-    const part = targets.slice(i, i + DETECT_CHUNK);
-    const res = await api('/accounts/batch', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'test', ids: part.map(a => a.id) }),
-    });
-    if (res?.success) {
-      connected += res.data?.connected || 0;
-      failed += res.data?.failed || 0;
-      removed += res.data?.deleted || 0;
-      for (const result of res.data?.results || []) {
-        if (result.deleted) continue;
-        for (const list of [state.accounts, accountsView]) {
-          const acc = list.find(a => a.id === result.id);
-          if (acc && result.inbox) acc.inbox = result.inbox;
-        }
-      }
-    } else {
-      failed += part.length;
+function startDetectPolling() {
+  stopDetectPolling();
+  detectPollTimer = setInterval(async () => {
+    // The banner lives on the accounts page only; stop polling once it is gone
+    if (!document.getElementById('detectBanner')) { stopDetectPolling(); return; }
+    const res = await api('/accounts/detect/status');
+    if (!res?.success) return;
+    renderDetectBanner(res.data);
+    if (!res.data || res.data.state === 'done' || res.data.state === 'stopped') {
+      stopDetectPolling();
+      // Pull the finished results in (counts filled, dead mailboxes gone)
+      await loadAccounts(document.getElementById('accountGroupFilter')?.value || undefined);
+      setAccountsView(state.accounts);
+      renderDetectBanner(res.data);
     }
-    done += part.length;
-    paint();
-  }
+  }, 3000);
+}
 
-  stopBtn.style.display = 'none';
-  closeBtn.style.display = '';
-  stat.innerHTML += `<div style="margin-top:8px;color:var(--text-muted)">${detectStop ? t('已停止') : t('检测完成')}</div>`;
+function stopDetectPolling() {
+  if (detectPollTimer) { clearInterval(detectPollTimer); detectPollTimer = null; }
+}
+
+// Progress strip above the table. Rendered from the server-side job row, so it
+// looks the same in a fresh tab as in the one that started the job.
+function renderDetectBanner(job) {
+  const host = document.getElementById('detectBanner');
+  if (!host) return;
+  if (!job || job.state === 'stopped' && !job.processed) { host.style.display = 'none'; host.innerHTML = ''; return; }
+
+  const active = job.state === 'running' || job.state === 'stopping';
+  const pct = job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0;
+  const stateLabel = { running: t('检测中'), stopping: t('正在停止...'), stopped: t('已停止'), done: t('检测完成') }[job.state] || job.state;
+  host.style.display = '';
+  host.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px">
+      <b>${esc(job.scope_label || t('全部分组'))}</b>
+      <span style="color:var(--text-muted)">${stateLabel} ${job.processed}/${job.total}（${pct}%）</span>
+      <span style="color:var(--success)">${t('正常 {n}', { n: job.connected })}</span>
+      <span style="color:var(--danger)">${t('失败 {n}', { n: job.failed })}</span>
+      <span style="color:var(--text-muted)">${t('已删除 {n}', { n: job.deleted })}</span>
+      ${job.last_email ? `<span style="color:var(--text-dim)">${esc(job.last_email)}</span>` : ''}
+      <span style="flex:1"></span>
+      ${active
+        ? `<button class="btn btn-sm btn-danger" onclick="stopDetectJob()">${t('停止')}</button>`
+        : `<button class="btn btn-sm" onclick="dismissDetectBanner()">${t('关闭')}</button>`}
+    </div>
+    <div style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden;margin-top:8px">
+      <div style="height:100%;width:${pct}%;background:var(--primary);transition:width .3s"></div>
+    </div>`;
+}
+
+function dismissDetectBanner() {
+  const host = document.getElementById('detectBanner');
+  if (host) { host.style.display = 'none'; host.innerHTML = ''; }
+  stopDetectPolling();
+}
+
+// Called when the accounts page mounts: show an already-running job (started in
+// another tab, or before a reload) and resume polling it.
+async function resumeDetectJob() {
+  const res = await api('/accounts/detect/status');
+  if (!res?.success || !res.data) return;
+  const job = res.data;
+  if (job.state !== 'running' && job.state !== 'stopping') return;
+  renderDetectBanner(job);
+  startDetectPolling();
 }
 
 // Manual recount of the current page (also refreshes counts that are already known)

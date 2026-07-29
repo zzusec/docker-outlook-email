@@ -3,177 +3,26 @@ import type { Env, AccountRow } from '../types';
 import { query, first, run, batchRun, chunk, getSetting, D1_MAX_BOUND_PARAMS } from '../db';
 import { ok, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
+import { getMailAccessToken, getInboxTotal, isPermanentTokenFailure, type GraphError } from '../graph';
 import {
-  fetchEmails,
-  getMailAccessToken,
-  getInboxTotal,
-  isPermanentTokenFailure,
-  type GraphError,
-} from '../graph';
+  probeAccount,
+  publicProbeResult,
+  persistProbeResults,
+  mapWithConcurrency,
+  PROBE_CONCURRENCY,
+} from '../probe';
+import {
+  startDetectJob,
+  stopDetectJob,
+  getLatestDetectJob,
+  advanceDetectJob,
+} from '../detect';
 
 const accounts = new Hono<{ Bindings: Env }>();
 
 const MAX_CONNECTION_TESTS_PER_REQUEST = 10;
-const CONNECTION_TEST_CONCURRENCY = 4;
 // One page of the account list; each account costs a token call plus a folder call.
 const MAX_INBOX_COUNTS_PER_REQUEST = 20;
-
-type ProbeStage = 'token' | 'mail' | 'not_found';
-
-interface AccountProbeResult {
-  id: number;
-  email: string;
-  exists: boolean;
-  connected: boolean;
-  status?: 'active' | 'error';
-  stage?: ProbeStage;
-  error?: GraphError;
-  count_error?: GraphError;
-  inbox: { total: number | null; checked_at: string | null };
-  newRefreshToken?: string;
-  shouldUpdateInbox?: boolean;
-}
-
-function publicProbeResult(result: AccountProbeResult) {
-  return {
-    id: result.id,
-    email: result.email,
-    exists: result.exists,
-    connected: result.connected,
-    ...(result.status ? { status: result.status } : {}),
-    ...(result.stage ? { stage: result.stage } : {}),
-    ...(result.error ? { error: result.error } : {}),
-    ...(result.count_error ? { count_error: result.count_error } : {}),
-    inbox: result.inbox,
-  };
-}
-
-async function probeAccount(acc: AccountRow): Promise<AccountProbeResult> {
-  const inbox = {
-    total: acc.inbox_total ?? null,
-    checked_at: acc.inbox_count_updated_at ?? null,
-  };
-  const tokenResult = await getMailAccessToken(acc.client_id, acc.refresh_token);
-
-  if (!tokenResult.token) {
-    return {
-      id: acc.id,
-      email: acc.email,
-      exists: true,
-      connected: false,
-      status: 'error',
-      stage: 'token',
-      error: tokenResult.error ?? { code: 'TOKEN_FAILED', message: 'Token acquisition failed' },
-      inbox,
-    };
-  }
-
-  // A refresh grant can succeed even when the app has no usable Graph Mail access.
-  const mailResult = await fetchEmails(tokenResult.token, { folder: 'inbox', top: 1, skip: 0 });
-  if (mailResult.error) {
-    return {
-      id: acc.id,
-      email: acc.email,
-      exists: true,
-      connected: false,
-      status: 'error',
-      stage: 'mail',
-      error: mailResult.error,
-      inbox,
-      newRefreshToken: tokenResult.newRefreshToken,
-    };
-  }
-
-  const countResult = await getInboxTotal(tokenResult.token);
-  if (countResult.error || countResult.total === undefined) {
-    return {
-      id: acc.id,
-      email: acc.email,
-      exists: true,
-      connected: true,
-      status: 'active',
-      count_error: countResult.error ?? { code: 'GRAPH_ERROR', message: 'Inbox count unavailable' },
-      inbox,
-      newRefreshToken: tokenResult.newRefreshToken,
-    };
-  }
-
-  return {
-    id: acc.id,
-    email: acc.email,
-    exists: true,
-    connected: true,
-    status: 'active',
-    inbox: { total: countResult.total, checked_at: new Date().toISOString() },
-    newRefreshToken: tokenResult.newRefreshToken,
-    shouldUpdateInbox: true,
-  };
-}
-
-function probeUpdateStatement(acc: AccountRow, result: AccountProbeResult) {
-  const assignments: string[] = [];
-  const params: unknown[] = [];
-
-  if (result.newRefreshToken && result.newRefreshToken !== acc.refresh_token) {
-    assignments.push('refresh_token = ?');
-    params.push(result.newRefreshToken);
-  }
-  assignments.push('status = ?', 'updated_at = CURRENT_TIMESTAMP');
-  params.push(result.status);
-  if (result.shouldUpdateInbox) {
-    assignments.push('inbox_total = ?', 'inbox_count_updated_at = ?');
-    params.push(result.inbox.total, result.inbox.checked_at);
-  }
-  params.push(acc.id);
-
-  return {
-    sql: `UPDATE accounts SET ${assignments.join(', ')} WHERE id = ?`,
-    params,
-  };
-}
-
-// Persist a probe round. Accounts whose refresh token failed permanently are
-// deleted (when enabled) instead of being parked in "error" forever; the ids of
-// the removed accounts are returned so the caller can report them.
-async function persistProbeResults(
-  db: D1Database,
-  probes: Array<{ account: AccountRow; result: AccountProbeResult }>,
-  deleteInvalid: boolean
-): Promise<number[]> {
-  const deletedIds = probes
-    .filter(({ result }) => deleteInvalid && result.stage === 'token' && isPermanentTokenFailure(result.error))
-    .map(({ account }) => account.id);
-  const dead = new Set(deletedIds);
-
-  const statements = probes
-    .filter(({ account }) => !dead.has(account.id))
-    .map(({ account, result }) => probeUpdateStatement(account, result));
-  for (const id of deletedIds) {
-    statements.push({ sql: 'DELETE FROM account_tags WHERE account_id = ?', params: [id] });
-    statements.push({ sql: 'DELETE FROM accounts WHERE id = ?', params: [id] });
-  }
-  await batchRun(db, statements);
-  return deletedIds;
-}
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-
-  async function runWorker() {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await worker(items[index]);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runWorker));
-  return results;
-}
 
 // Mask account for list responses
 function safeAccount(acc: AccountRow) {
@@ -510,7 +359,7 @@ accounts.post('/batch', async (c) => {
     );
     const probes = await mapWithConcurrency(
       foundAccounts,
-      CONNECTION_TEST_CONCURRENCY,
+      PROBE_CONCURRENCY,
       async (account) => ({ account, result: await probeAccount(account) })
     );
     const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
@@ -593,6 +442,56 @@ accounts.post('/batch', async (c) => {
   return badRequest('未知操作');
 });
 
+// ---- Background detection jobs (survive a closed browser tab) ----
+
+// POST /api/accounts/detect/start — probe every account in the given scope
+accounts.post('/detect/start', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    group_id?: number | string;
+    status?: string;
+    tag_id?: number | string;
+    label?: string;
+  };
+  const toId = (v: number | string | undefined) => {
+    const n = typeof v === 'string' ? parseInt(v, 10) : v;
+    return Number.isInteger(n) && (n as number) > 0 ? (n as number) : null;
+  };
+  const status = ['active', 'error', 'disabled'].includes(String(body.status)) ? String(body.status) : null;
+
+  const { job, created } = await startDetectJob(c.env.DB, {
+    group_id: toId(body.group_id),
+    status,
+    tag_id: toId(body.tag_id),
+    label: typeof body.label === 'string' ? body.label.slice(0, 100) : '',
+  });
+  if (!created) return ok(job, '已有检测任务在运行，返回当前任务');
+  if (!job.total) return ok(job, '该范围内没有账号');
+
+  // Kick the first batch immediately so the UI shows progress right away; the
+  // driver (Node interval / Workers cron) keeps it going from there.
+  const firstBatch = advanceDetectJob(c.env).catch(() => undefined);
+  try {
+    // Workers kills stray promises when the response returns; Node does not.
+    c.executionCtx.waitUntil(firstBatch);
+  } catch {
+    // No ExecutionContext bound (Node server, tests) — the promise runs on its own
+  }
+  return ok(job, `已在后台开始检测 ${job.total} 个邮箱`);
+});
+
+// GET /api/accounts/detect/status — latest job (running or finished)
+accounts.get('/detect/status', async (c) => {
+  const job = await getLatestDetectJob(c.env.DB);
+  return ok(job);
+});
+
+// POST /api/accounts/detect/stop
+accounts.post('/detect/stop', async (c) => {
+  const stopped = await stopDetectJob(c.env.DB);
+  const job = await getLatestDetectJob(c.env.DB);
+  return ok(job, stopped ? '正在停止，当前批次结束后停止' : '没有正在运行的检测任务');
+});
+
 // POST /api/accounts/inbox-counts
 // Refresh the Inbox totals of specific accounts. The list view calls this lazily
 // for the rows it renders, so counts appear for accounts that were never tested
@@ -612,7 +511,7 @@ accounts.post('/inbox-counts', async (c) => {
   );
   const deleteInvalid = (await getSetting(c.env.DB, 'token_refresh_delete_invalid')) !== '0';
 
-  const results = await mapWithConcurrency(found, CONNECTION_TEST_CONCURRENCY, async (account) => {
+  const results = await mapWithConcurrency(found, PROBE_CONCURRENCY, async (account) => {
     const tokenResult = await getMailAccessToken(account.client_id, account.refresh_token);
     if (!tokenResult.token) {
       const dead = deleteInvalid && isPermanentTokenFailure(tokenResult.error);

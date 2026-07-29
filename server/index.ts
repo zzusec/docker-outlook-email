@@ -4,11 +4,16 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import worker from '../src/index';
 import { runEmailPush, runTokenRefresh } from '../src/cron';
+import { advanceDetectJob } from '../src/detect';
 import type { Env } from '../src/types';
 import { applyMigrations, importD1Data, openDatabase } from './sqlite';
 import { rewriteExternalUrl } from './url';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+// A background detection job advances one batch per tick. 10 accounts every 5s
+// is ~120/min — fast enough to sweep thousands of mailboxes in under an hour
+// while staying far below Microsoft's throttling threshold.
+const DETECT_TICK_MS = 5 * 1000;
 
 class NodeExecutionContext {
   waitUntil(promise: Promise<unknown>): void {
@@ -91,6 +96,21 @@ async function main(): Promise<void> {
   };
   const timer = setInterval(() => void runScheduledJobs(), FIVE_MINUTES_MS);
 
+  // Background detection driver: one batch per tick, never overlapping itself.
+  let detectRunning = false;
+  const detectTimer = setInterval(() => {
+    if (detectRunning) return;
+    detectRunning = true;
+    void advanceDetectJob(env)
+      .then((status) => {
+        if (status !== 'idle') console.log(`detect ${status}`);
+      })
+      .catch((error) => console.error('Detection batch failed:', error))
+      .finally(() => {
+        detectRunning = false;
+      });
+  }, DETECT_TICK_MS);
+
   const port = Number.parseInt(process.env.PORT || '8787', 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535');
   const server = serve(
@@ -105,6 +125,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}, shutting down`);
     clearInterval(timer);
+    clearInterval(detectTimer);
     server.close(() => {
       db.close();
       process.exit(0);

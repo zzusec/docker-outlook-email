@@ -322,8 +322,13 @@ var I18N_EN = {
   '检测范围（分组）': 'Check scope (group)',
   '检测当前分组': 'Check current group',
   '按当前筛选（分组/状态/标签）逐批检测所有邮箱': 'Check every mailbox matching the current group / status / tag filter, batch by batch',
-  '将检测「{scope}」下的 {n} 个邮箱，可随时停止。失效邮箱会按设置自动删除，确认？':
-    'This checks {n} mailboxes in "{scope}" and can be stopped at any time. Dead mailboxes are deleted according to your settings. Continue?',
+  '将在后台检测「{scope}」下的 {n} 个邮箱，关闭页面也会继续，可随时停止。失效邮箱会按设置自动删除，确认？':
+    'This checks {n} mailboxes in "{scope}" in the background - it keeps running after you close the page, and can be stopped at any time. Dead mailboxes are deleted according to your settings. Continue?',
+  '确认停止后台检测？已检测的结果会保留。': 'Stop the background check? Results collected so far are kept.',
+  '已在后台开始检测': 'Background check started',
+  '启动失败': 'Could not start',
+  '检测中': 'Checking',
+  '关闭': 'Dismiss',
   '当前筛选下没有账号': 'No accounts match the current filter',
   '批量检测': 'Bulk check',
   '共 {n} 个': '{n} total',
@@ -484,6 +489,11 @@ var SERVER_EN_PATTERNS = [
       if (counted) out += ', ' + counted + ' counts updated';
       return out;
     }],
+  [/^已在后台开始检测 (\d+) 个邮箱$/, 'Background check started for $1 mailboxes'],
+  ['已有检测任务在运行，返回当前任务', 'A check is already running; showing that job'],
+  ['正在停止，当前批次结束后停止', 'Stopping after the current batch finishes'],
+  ['没有正在运行的检测任务', 'No check is currently running'],
+  ['该范围内没有账号', 'No accounts in that scope'],
   [/^统计完成：成功 (\d+)(?:，删除失效 (\d+))?$/, function (m, counted, deleted) {
     return 'Counted ' + counted + ' mailboxes' + (deleted ? ', ' + deleted + ' dead removed' : '');
   }],
