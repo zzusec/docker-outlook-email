@@ -31,7 +31,6 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
 COPY --from=build /app/migrations ./migrations
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY warmup.cjs ./warmup.cjs
 RUN mkdir -p /data && chown node:node /data
 
 EXPOSE 8787
