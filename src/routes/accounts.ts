@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
-import { query, first, run, batchRun, chunk, D1_MAX_BOUND_PARAMS } from '../db';
+import { query, first, run, batchRun, chunk, getSetting, D1_MAX_BOUND_PARAMS } from '../db';
 import { ok, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
 import {
@@ -10,7 +10,6 @@ import {
   isPermanentTokenFailure,
   type GraphError,
 } from '../graph';
-import { getSetting } from '../cron';
 
 const accounts = new Hono<{ Bindings: Env }>();
 

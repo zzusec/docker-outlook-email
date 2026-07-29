@@ -44,6 +44,12 @@ export async function first<T = Record<string, unknown>>(
   return stmt.first<T>();
 }
 
+// Read a single settings value (undefined when the key was never written)
+export async function getSetting(db: D1Database, key: string): Promise<string | undefined> {
+  const row = await first<{ value: string }>(db, 'SELECT value FROM settings WHERE key = ?', [key]);
+  return row?.value;
+}
+
 // Execute a statement (INSERT/UPDATE/DELETE) and return metadata
 export async function run(
   db: D1Database,

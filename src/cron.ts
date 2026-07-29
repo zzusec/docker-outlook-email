@@ -1,5 +1,5 @@
 import type { Env, AccountRow } from './types';
-import { query, first, run } from './db';
+import { query, first, run, getSetting } from './db';
 import {
   getMailAccessToken,
   getInboxTotal,
@@ -12,18 +12,17 @@ import { sendTelegramMessage, escapeHtml } from './telegram';
 const MAX_BATCH = 40;
 
 // With inbox-count refresh on, each account costs a token call plus a folder call
-// (and each may retry on the Outlook REST fallback), so the batch has to be smaller.
+// (and each may retry on the Outlook REST fallback). That only matters on Workers,
+// where a single invocation is capped at 50 subrequests; the Node/Docker build has
+// no such cap and keeps the full batch.
 const MAX_BATCH_WITH_INBOX = 20;
+const IS_WORKERS =
+  (globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent === 'Cloudflare-Workers';
 
 // Push budget is tighter: each account costs 1 token + 1 fetch + up to N sends.
 // Keep the account batch small and cap messages so we stay well under 50 subrequests.
 const PUSH_MAX_ACCOUNTS = 8;
 const PUSH_MAX_MSGS_PER_ACCOUNT = 3;
-
-export async function getSetting(db: D1Database, key: string): Promise<string | undefined> {
-  const row = await first<{ value: string }>(db, 'SELECT value FROM settings WHERE key = ?', [key]);
-  return row?.value;
-}
 
 async function setSetting(db: D1Database, key: string, value: string): Promise<void> {
   await run(
@@ -58,7 +57,7 @@ export async function runTokenRefresh(env: Env, opts: { force?: boolean } = {}):
 
   const batch = Math.min(
     parseInt((await getSetting(db, 'token_refresh_batch')) || '20', 10) || 20,
-    updateInbox ? MAX_BATCH_WITH_INBOX : MAX_BATCH
+    updateInbox && IS_WORKERS ? MAX_BATCH_WITH_INBOX : MAX_BATCH
   );
 
   // Optional scope: check only one group instead of the whole account list
