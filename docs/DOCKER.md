@@ -1,13 +1,13 @@
 # Docker 服务器部署
 
-Docker 模式复用现有 Hono 后端和前端，使用本地 SQLite 代替 Cloudflare D1，并在容器内每 5 分钟执行一次 Token 保活和 Telegram 邮件推送任务。Cloudflare 部署入口仍然保留，两种模式可以并行验证后再切换流量。
+Docker 模式复用现有 Hono 后端和前端，使用本地 SQLite 代替 Cloudflare D1。容器每 5 分钟唤醒 Token 保活和 Telegram 邮件推送调度器，是否实际执行由系统设置控制；后台批量检测任务每 5 秒推进一次。Cloudflare 部署入口仍然保留，两种模式可以并行验证后再切换流量。
 
 ## 1. 首次部署
 
 服务器需要安装 Docker Engine 和 Docker Compose v2。
 
 ```bash
-git clone https://github.com/roseforyou/cf-outlook-email.git
+git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
 cp .env.example .env
 openssl rand -hex 32

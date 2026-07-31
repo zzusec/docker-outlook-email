@@ -1,153 +1,415 @@
-# 📬 Outlook Email Manager
+# cf-outlook-email
 
-<div align="center">
+A self-hosted web dashboard for managing multiple **Outlook, Hotmail, and Live email accounts** from one place.
 
-**Lightweight Outlook email manager powered by Cloudflare Workers**
+The application uses Microsoft Graph API to access accounts that you explicitly add and authorize. It can inspect account status, refresh tokens, read mail, search for verification codes, run background batch jobs, send Telegram notifications, and expose API-key-protected endpoints.
 
-🆓 100% Free · ☁️ No Server Required · 🌍 Global CDN · 🌗 Dark/Light Theme · 🌐 Bilingual UI
+This repository is deployed with **Docker Compose, Node.js, and local SQLite storage**.
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
-[![Hono](https://img.shields.io/badge/Hono-4-E36002?logo=hono&logoColor=white)](https://hono.dev/)
-[![D1](https://img.shields.io/badge/D1-SQLite-003B57?logo=sqlite&logoColor=white)](https://developers.cloudflare.com/d1/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/roseforyou/cf-outlook-email/pulls)
+> This is not an account-registration tool or a mail server. Only use it with accounts you own or are explicitly authorized to manage.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/roseforyou/cf-outlook-email)
+## What It Does
 
-⚠️ This button **cannot one-click deploy** this project: it relies on a D1 database and Secrets, which require manually creating the DB, running migrations, and setting secrets — the button fails at framework detection. Please follow the 📖 [Deployment Guide](./docs/GUIDE.md) instead (~5 min).
+- Manage multiple Outlook, Hotmail, and Live accounts
+- Add accounts through Microsoft OAuth
+- Import, export, delete, move, and filter accounts in bulk
+- Check account health and refresh tokens in background jobs
+- Read Inbox, Junk Email, and Deleted Items
+- Search messages, extract verification codes, and download attachments
+- Organize accounts with groups and tags
+- Count messages and clean up invalid accounts
+- Continue batch jobs after the browser is closed
+- Refresh tokens on a schedule
+- Push new messages to Telegram
+- Read accounts, messages, and codes through an external API
+- Create temporary addresses through GPTMail
+- Use Chinese/English UI and dark/light themes
 
-🌐 [中文](./README.md) · 📖 [Cloudflare Deployment](./docs/GUIDE.md) · 🐳 [Docker Deployment (Chinese)](./docs/DOCKER.md) · 🔌 [API Docs](./docs/API.md)
+## Screenshots
 
-</div>
-
----
-
-| 🌙 Dark | ☀️ Light |
+| Dark | Light |
 |:---:|:---:|
 | ![Dark mode](./docs/preview.png) | ![Light mode](./docs/preview-light.png) |
 
-## ✨ Features
+## Installation
 
-- 🔐 **One-Click OAuth** — Authorize Outlook accounts via browser popup, no manual token copying
-- 🔄 **Auto Token Refresh** — Automatically saves new refresh tokens on each use, preventing expiry
-- 📦 **Batch Operations** — Import/export/delete/move in bulk, including per-row & selected export, with group & status filters
-- 📨 **Email Reading** — Read inbox / junk / deleted via Microsoft Graph API with folder switching, aggregated view, paginated load-more, search and HTML rendering
-- 📭 **Temp Email** — GPTMail API integration for disposable email addresses
-- 🎨 **Polished Themes** — Dark / Light / Auto with glassmorphism, circle-swoop transition & ambient breathing glow
-- 🌐 **Bilingual UI** — Chinese by default, one-click switch to English in the topbar, preference remembered locally, backend messages translated on display
-- 🆓 **Completely Free** — Runs on Cloudflare's free tier, no credit card needed
+### 1. Prepare the server
 
-## 🚀 Quick Deploy
+Install:
 
-> 💡 See the [Deployment Guide](./docs/GUIDE.md) for full steps.
+- Git
+- Docker Engine
+- Docker Compose v2
 
-### Option A: One-shot script (recommended)
+Verify the installation:
 
-Automates: install deps → login check → create/reuse D1 → write `wrangler.toml` → secrets → migrate → deploy.
+```bash
+docker --version
+docker compose version
+```
+
+### 2. Download the project
 
 ```bash
 git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
-chmod +x install.sh
-./install.sh
-# non-interactive:
-# ADMIN_PASSWORD='your-password' ./install.sh -y
 ```
 
-### Option B: Manual commands
+### 3. Create the configuration
 
 ```bash
-# 1. Clone & install
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
-pnpm install
-
-# 2. Login to Cloudflare
-pnpm exec wrangler login
-
-# 3. Create D1 database (copy database_id to wrangler.toml)
-pnpm exec wrangler d1 create outlook-email-db
-cp wrangler.toml.example wrangler.toml
-# Edit wrangler.toml, replace REPLACE_WITH_YOUR_DATABASE_ID
-
-# 4. Set secrets
-pnpm exec wrangler secret put ADMIN_PASSWORD
-pnpm exec wrangler secret put COOKIE_SECRET
-
-# 5. Initialize & deploy
-pnpm exec wrangler d1 migrations apply outlook-email-db --remote
-pnpm exec wrangler deploy
+cp .env.example .env
+openssl rand -hex 32
+vim .env
 ```
 
-Visit the output URL and login with your password. 🎉
+Use the generated random value as `COOKIE_SECRET`, then edit:
 
-## 📮 Adding Accounts
+```dotenv
+ADMIN_PASSWORD=replace-with-a-strong-password
+COOKIE_SECRET=paste-the-openssl-output-here
+PUBLIC_URL=https://mail.example.com
+APP_PORT=8787
+BIND_ADDRESS=127.0.0.1
+# GPTMAIL_API_KEY=
+```
 
-Login → **Add Account** → **One-Click Auth** → Microsoft login popup → Authorize → Credentials auto-filled → Save.
+You must replace:
 
-Works with all Outlook / Hotmail / Live accounts. Bulk import supported (format: `email----password----client_id----refresh_token`).
+- `ADMIN_PASSWORD`
+- `COOKIE_SECRET`
+- `PUBLIC_URL`
 
-## 🧱 Tech Stack
+`PUBLIC_URL` must contain only the scheme, host, and optional port:
 
-| Layer | Technology |
-|-------|-----------|
-| ⚙️ Runtime | Cloudflare Workers (TypeScript) |
-| 🧭 Router | Hono |
-| 🗄️ Database | Cloudflare D1 (SQLite) |
-| 🎨 Frontend | Vanilla HTML/CSS/JS |
-| 📧 Email | Microsoft Graph API |
-| 🚀 Deploy | Wrangler |
+```text
+https://mail.example.com
+```
 
-## 💰 Free Tier Limits
+Do not use a path:
 
-| Resource | Free Quota | Sufficient? |
-|----------|-----------|:-----------:|
-| ⚡ Worker Requests | 100K/day | ✅ |
-| ⏱️ CPU Time | 10ms/req | ✅ |
-| 🌐 Subrequests | 50/req | ✅ (single account per request) |
-| 💾 D1 Storage | 5 GB | ✅ |
+```text
+https://mail.example.com/path
+```
 
-## 🗺️ Roadmap
+For temporary direct-IP testing:
 
-**Core features (implemented)**
+```dotenv
+PUBLIC_URL=http://YOUR_SERVER_IP:8787
+BIND_ADDRESS=0.0.0.0
+APP_PORT=8787
+```
 
-- [x] 🔐 One-click OAuth & auto token refresh
-- [x] 👤 Account management (CRUD, connection test)
-- [x] 🗂️ Group management (custom colors, group & status filters)
-- [x] 📦 Bulk import / export / delete / move
-- [x] 📤 Per-row & selected export
-- [x] 📨 Email reading (live fetch, search, HTML rendering)
-- [x] 📁 Folder switching (Inbox / Junk / Deleted)
-- [x] 🔀 Aggregated view (Inbox + Junk merged by time — great for finding codes)
-- [x] 📄 Paginated load-more
-- [x] 📭 Temp email (GPTMail integration)
-- [x] 🎨 Theme switching + circle-swoop transition + breathing glow
-- [x] 🔑 External API + API Key (login-free email fetch for automation, see [API Docs](./docs/API.md))
-- [x] 🗑️ Delete emails (single / batch, soft-delete to Deleted Items)
-- [x] 📎 Attachment download
-- [x] 🏷️ Tag system (multiple tags per account, cross-group filtering)
-- [x] ⏰ Scheduled token refresh (Cron Trigger, configurable interval/batch, keeps accounts alive)
-- [x] 🤖 Telegram push for new emails (cron polling, near-real-time delivery, configurable interval)
-- [x] 🧭 UI polish (per-page toolbars, dashboard health cards, responsive settings grid, paginated accounts table, searchable account combobox)
-- [x] 🌐 UI internationalization (Chinese default, one-click English)
+For production, keep `BIND_ADDRESS=127.0.0.1` and use Nginx or Caddy for HTTPS.
 
-**Planned (PRs welcome)**
+### 4. Build and start
 
-- [ ] 🔔 More push channels (WeCom / DingTalk etc.)
+```bash
+docker compose up -d --build
+```
 
-> ⚠️ Due to Cloudflare Workers platform limits, the following are not feasible: IMAP (Gmail / QQ / 163 and other non-Microsoft mailboxes), SMTP forwarding, HTTP/SOCKS5 proxy.
+Check the container and logs:
 
-## ⚠️ Disclaimer
+```bash
+docker compose ps
+docker compose logs --tail=200 outlook-email
+```
 
-This project is intended for personal use to manage your own email accounts. Ensure you have legal authorization for all accounts you manage. The default Client ID is Mozilla Thunderbird's public ID for quick setup only — registering your own Azure app is recommended for production use. The author assumes no liability for any misuse.
+Check application health:
 
-## 🙏 Credits
+```bash
+curl http://127.0.0.1:8787/healthz
+```
 
-This project is a rewrite of [xiaozhi349/outlookEmail](https://github.com/xiaozhi349/outlookEmail), originally built with Python Flask + SQLite. It has been migrated to Cloudflare Workers + D1 with a completely new frontend and backend. Thanks to the original author.
+Expected response:
 
-## 📜 License
+```json
+{"ok":true}
+```
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
+On first startup, the application creates the SQLite database and applies all pending migrations automatically.
 
-Licensed under **GPL-3.0**. Free to use, modify, and distribute — but any distributed derivative must also be open-sourced under GPL-3.0 with full source code.
+Persistent data is stored in:
+
+```text
+./data/outlook-email.db
+```
+
+### 5. Sign in
+
+Open the domain configured in `PUBLIC_URL` and sign in with `ADMIN_PASSWORD`.
+
+After the first successful login, a password hash is stored in SQLite. Change the password from the application Settings page. Editing `ADMIN_PASSWORD` later may not replace a password already stored in the database.
+
+## Adding Outlook Accounts
+
+After signing in:
+
+1. Open account management
+2. Click **Add Account**
+3. Select **One-Click Auth**
+4. Sign in through the Microsoft popup
+5. Approve access
+6. Save the automatically populated credentials
+
+Bulk import format:
+
+```text
+email----password----client_id----refresh_token
+```
+
+See [API documentation](./docs/API.md) for external integrations.
+
+## HTTPS Reverse Proxy
+
+Nginx example:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name mail.example.com;
+
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+Set the matching values in `.env`:
+
+```dotenv
+PUBLIC_URL=https://mail.example.com
+BIND_ADDRESS=127.0.0.1
+APP_PORT=8787
+```
+
+When using your own Azure application, add this redirect URI:
+
+```text
+https://mail.example.com/api/oauth/callback
+```
+
+## Updating
+
+The project does not use a remote prebuilt image. Pull the source and rebuild the image on the server.
+
+### Standard update procedure
+
+Enter the project directory:
+
+```bash
+cd cf-outlook-email
+```
+
+Back up the data:
+
+```bash
+docker compose stop
+tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+docker compose start
+```
+
+Pull the latest source:
+
+```bash
+git pull --ff-only
+```
+
+Rebuild and start:
+
+```bash
+docker compose up -d --build --remove-orphans
+```
+
+Verify the update:
+
+```bash
+docker compose ps
+docker compose logs --tail=200 outlook-email
+curl http://127.0.0.1:8787/healthz
+```
+
+New database migrations are applied automatically when the container starts.
+
+### Show the current version
+
+```bash
+git log -1 --oneline
+```
+
+### Roll back code
+
+If an update fails, inspect the logs first:
+
+```bash
+docker compose logs --tail=300 outlook-email
+```
+
+To temporarily return to an earlier commit:
+
+```bash
+git log --oneline -10
+git checkout PREVIOUS_COMMIT_ID
+docker compose up -d --build --remove-orphans
+```
+
+Return to the main branch with:
+
+```bash
+git checkout main
+```
+
+Restore the pre-update data backup if the database also needs to be rolled back.
+
+## Backup and Restore
+
+### Backup
+
+SQLite runs in WAL mode. Stop the service briefly and archive the entire `data/` directory:
+
+```bash
+cd cf-outlook-email
+docker compose stop
+tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+docker compose start
+```
+
+The backup may contain password hashes, Outlook refresh tokens, API keys, Telegram settings, and account data. Store it securely.
+
+### Restore
+
+```bash
+cd cf-outlook-email
+docker compose stop
+mv data data.before-restore
+tar -xzf ../cf-outlook-email-data-TIMESTAMP.tar.gz
+docker compose up -d
+docker compose logs --tail=200 outlook-email
+curl http://127.0.0.1:8787/healthz
+```
+
+Restore the complete `data/` directory, not only `outlook-email.db`, because WAL/SHM files may also be present.
+
+## Common Commands
+
+```bash
+# Status
+docker compose ps
+
+# Live logs
+docker compose logs -f --tail=200 outlook-email
+
+# Stop and start
+docker compose stop
+docker compose start
+
+# Restart
+docker compose restart outlook-email
+
+# Rebuild
+docker compose up -d --build
+
+# Remove containers without deleting ./data
+docker compose down
+```
+
+Back up the data before maintenance even though `docker compose down` does not remove the bind-mounted `./data` directory.
+
+## Environment Variables
+
+| Variable | Required | Default | Purpose |
+|---|:---:|---|---|
+| `ADMIN_PASSWORD` | Yes | None | Initial administrator password |
+| `COOKIE_SECRET` | Yes | None | Login-cookie signing secret |
+| `PUBLIC_URL` | Recommended | Derived from headers | Public origin, OAuth callbacks, and secure cookies |
+| `APP_PORT` | No | `8787` | Host port |
+| `BIND_ADDRESS` | No | `127.0.0.1` | Host bind address |
+| `GPTMAIL_API_KEY` | No | None | GPTMail API key |
+
+Important:
+
+- The container refuses to start without `ADMIN_PASSWORD` or `COOKIE_SECRET`.
+- `PUBLIC_URL` cannot contain a path, query, or fragment.
+- Changing `COOKIE_SECRET` invalidates all existing login sessions.
+- Never commit `.env` or `data/`.
+
+## Background Jobs
+
+The Docker container runs a long-lived Node.js service:
+
+- The token-refresh scheduler wakes every five minutes
+- The Telegram scheduler wakes every five minutes
+- Background batch account jobs advance every five seconds
+
+Whether a scheduler performs work depends on its settings, interval, and batch size.
+
+Automatic refresh cannot guarantee that a token will remain valid forever. Revoked consent, Microsoft risk controls, account issues, and permission changes can invalidate tokens.
+
+## Migrating from Cloudflare D1
+
+Existing data from the older Cloudflare Workers + D1 deployment can be imported into Docker SQLite.
+
+The export contains sensitive refresh tokens and API keys, and importing is only allowed into an empty application database. Follow the [D1 migration instructions](./docs/DOCKER.md#2-从-cloudflare-d1-迁移已有数据).
+
+## Architecture
+
+```text
+Browser
+  ↓
+Nginx / Caddy (HTTPS)
+  ↓
+Docker Compose
+  ↓
+Node.js + Hono
+  ├── Static frontend
+  ├── Microsoft Graph API
+  ├── Background schedulers
+  └── SQLite: ./data/outlook-email.db
+```
+
+Main directories:
+
+```text
+server/                  Node.js entry and SQLite compatibility layer
+src/                     Backend logic and API routes
+public/                  Static frontend
+migrations/              Database migrations
+Dockerfile               Docker image definition
+docker-compose.yml       Container, ports, and persistence
+docker-entrypoint.sh     Container startup script
+.env.example             Environment example
+docs/                    Docker, API, and supporting documentation
+```
+
+## Security Recommendations
+
+- Use a strong administrator password
+- Generate and retain a random `COOKIE_SECRET`
+- Use HTTPS in production
+- Keep `BIND_ADDRESS=127.0.0.1` behind a reverse proxy
+- Never publish `.env`, `data/`, or database backups
+- Back up the complete `data/` directory regularly
+- Only add accounts you own or are authorized to manage
+- Register your own Azure application for production use
+
+## Documentation
+
+- [Docker deployment and D1 migration](./docs/DOCKER.md)
+- [External API](./docs/API.md)
+- [Azure OAuth reference](./docs/GUIDE.md#自己注册-azure-应用)
+- [中文 README](./README.md)
+
+## Disclaimer
+
+This project is intended for personal use and for managing email accounts you own or are authorized to access. Do not use it for unauthorized access, data theft, access-control bypass, or unlawful activity. Users are responsible for how they deploy and use the software.
+
+## License
+
+Licensed under [GPL-3.0](./LICENSE). You may use, modify, and redistribute the project, but publicly distributed derivative works must also provide complete source code under GPL-3.0.

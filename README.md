@@ -1,186 +1,499 @@
-# 📬 Outlook 邮件管理
+# cf-outlook-email
 
-<div align="center">
+一个部署在自己服务器上的 **Outlook / Hotmail 邮箱集中管理后台**。
 
-**基于 Cloudflare Workers 的轻量级 Outlook 邮件管理工具**
+项目通过 Microsoft Graph API 读取已授权邮箱，可以在一个网页里管理多个 Outlook、Hotmail、Live 邮箱，批量检查账号状态、刷新 Token、查看邮件、搜索验证码，并提供 Telegram 推送和外部 API。
 
-🆓 完全免费 · ☁️ 无需服务器 · 🌍 全球加速 · 🌗 深浅主题 · 🌐 中英双语
+本仓库当前以 **Docker Compose + Node.js + SQLite** 方式部署，数据保存在服务器本地。
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
-[![Hono](https://img.shields.io/badge/Hono-4-E36002?logo=hono&logoColor=white)](https://hono.dev/)
-[![D1](https://img.shields.io/badge/D1-SQLite-003B57?logo=sqlite&logoColor=white)](https://developers.cloudflare.com/d1/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/roseforyou/cf-outlook-email/pulls)
+> 这不是邮箱注册工具，也不是邮件服务器。项目只能访问你主动添加并完成授权的微软邮箱。请确保你对所有账号拥有合法使用权限。
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/roseforyou/cf-outlook-email)
+## 项目能做什么
 
-⚠️ 此按钮**无法一键部署**：项目依赖 D1 数据库与 Secret，需手动建库、跑迁移、设密钥，按钮会因框架检测失败而报错。请按 📖 [详细部署教程](./docs/GUIDE.md) 操作（约 5 分钟）。
+- 集中管理多个 Outlook、Hotmail、Live 邮箱
+- 通过微软 OAuth 一键添加邮箱
+- 批量导入、导出、删除、移动和筛选账号
+- 批量检测账号状态、刷新 Token
+- 查看收件箱、垃圾邮件、已删除邮件
+- 聚合多个文件夹并按时间查看邮件
+- 搜索邮件、提取验证码、下载附件
+- 按分组、标签、状态、国家和 IP 类型筛选账号
+- 统计每个邮箱的邮件数量
+- 后台执行批量检测和刷新，关闭网页后任务仍会继续
+- 定时刷新 Token
+- 将新邮件推送到 Telegram
+- 通过 API Key 调用外部接口读取邮箱和验证码
+- 使用 GPTMail 创建临时邮箱
+- 中文、英文界面以及深色、浅色主题
 
-🌐 [English](./README_EN.md) · 📖 [Cloudflare 部署教程](./docs/GUIDE.md) · 🐳 [Docker 服务器部署](./docs/DOCKER.md) · 🔌 [对外 API 文档](./docs/API.md)
+## 页面预览
 
-</div>
-
----
-
-| 🌙 深色模式 | ☀️ 浅色模式 |
+| 深色模式 | 浅色模式 |
 |:---:|:---:|
 | ![深色模式](./docs/preview.png) | ![浅色模式](./docs/preview-light.png) |
 
-## ✨ 特性
+## 安装
 
-- 🔐 **一键授权** — 浏览器弹窗登录微软账号，自动获取凭证，无需手动复制 token
-- 🔄 **Token 自动续期** — 每次读邮件自动刷新 token，只要定期使用就不会过期
-- 📦 **批量管理** — 批量导入/导出/删除/移组，支持单条与选中导出、分组和状态筛选
-- 📨 **邮件阅读** — 通过 Microsoft Graph API 实时读取，支持收件箱/垃圾箱/已删除文件夹切换、聚合视图、分页加载、搜索和 HTML 渲染
-- 📭 **临时邮箱** — 集成 GPTMail API，一键生成临时邮箱接收邮件
-- 🎨 **精致主题** — 深色/浅色/跟随系统，毛玻璃质感 + 圆形扫掠切换 + 低频呼吸光晕
-- 🌐 **中英双语** — 默认中文，顶栏一键切换 English，偏好本地记忆，后端消息同步翻译
-- 🆓 **完全免费** — 运行在 Cloudflare 免费层，无需信用卡
+### 1. 准备服务器
 
-## 🚀 快速部署
+推荐使用 Linux 服务器，并提前安装：
 
-> 💡 完整步骤请看 [详细部署教程](./docs/GUIDE.md)
+- Git
+- Docker Engine
+- Docker Compose v2
 
-### 方式一：一键脚本（推荐）
+确认 Docker 可以正常运行：
 
-自动完成：装依赖 → 登录检查 → 创建/复用 D1 → 写 `wrangler.toml` → 设 Secret → 迁移 → 部署，避免漏步骤和手填 `database_id` 出错。
+```bash
+docker --version
+docker compose version
+```
+
+### 2. 下载项目
 
 ```bash
 git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
-chmod +x install.sh
-./install.sh
-# 或非交互：
-# ADMIN_PASSWORD='你的登录密码' ./install.sh -y
 ```
 
-### 方式二：手动命令
-
-```bash
-# 1. 克隆 & 安装
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
-pnpm install
-
-# 2. 登录 Cloudflare
-pnpm exec wrangler login
-
-# 3. 创建数据库（把输出的 database_id 填入 wrangler.toml）
-pnpm exec wrangler d1 create outlook-email-db
-cp wrangler.toml.example wrangler.toml
-# 编辑 wrangler.toml，替换 REPLACE_WITH_YOUR_DATABASE_ID
-
-# 4. 配置密码
-pnpm exec wrangler secret put ADMIN_PASSWORD
-pnpm exec wrangler secret put COOKIE_SECRET
-
-# 5. 初始化 & 部署
-pnpm exec wrangler d1 migrations apply outlook-email-db --remote
-pnpm exec wrangler deploy
-```
-
-部署完成后访问输出的 URL，用设置的密码登录即可。🎉
-
-### 方式三：Docker 服务器部署
-
-Docker 模式使用本地 SQLite 持久化数据，并在容器内运行原有定时任务。已有 Cloudflare D1 数据也可以导入：
+### 3. 创建配置文件
 
 ```bash
 cp .env.example .env
-# 编辑 .env 后启动
+openssl rand -hex 32
+vim .env
+```
+
+将 `openssl` 生成的随机字符串填入 `COOKIE_SECRET`，并修改以下配置：
+
+```dotenv
+# 管理后台初始密码
+ADMIN_PASSWORD=请设置一个强密码
+
+# Cookie 签名密钥，填入 openssl rand -hex 32 的输出
+COOKIE_SECRET=请替换为随机字符串
+
+# 浏览器访问本项目的完整地址，只填写协议和域名，不要添加路径
+PUBLIC_URL=https://mail.example.com
+
+# 宿主机端口
+APP_PORT=8787
+
+# 默认只允许本机访问，适合通过 Nginx/Caddy 反向代理
+BIND_ADDRESS=127.0.0.1
+
+# 可选，也可以登录后台后再填写
+# GPTMAIL_API_KEY=
+```
+
+必须修改：
+
+- `ADMIN_PASSWORD`
+- `COOKIE_SECRET`
+- `PUBLIC_URL`
+
+`PUBLIC_URL` 示例：
+
+```text
+https://mail.example.com
+```
+
+不要填写：
+
+```text
+https://mail.example.com/
+https://mail.example.com/path
+```
+
+如果只是临时通过服务器 IP 测试，可以设置：
+
+```dotenv
+PUBLIC_URL=http://你的服务器IP:8787
+BIND_ADDRESS=0.0.0.0
+APP_PORT=8787
+```
+
+> 直接开放 `8787` 端口不适合正式使用。生产环境建议保持 `BIND_ADDRESS=127.0.0.1`，再通过 Nginx 或 Caddy 提供 HTTPS。
+
+### 4. 构建并启动
+
+```bash
 docker compose up -d --build
 ```
 
-完整配置、HTTPS 反向代理和 D1 数据迁移步骤见 [Docker 服务器部署文档](./docs/DOCKER.md)。
+查看容器状态：
 
-## 📮 添加邮箱
-
-登录后点击 **添加账号** → **一键授权** → 弹出微软登录窗口 → 授权后自动填入凭证 → 保存。
-
-支持所有 Outlook / Hotmail / Live 邮箱，也支持批量导入（格式：`邮箱----密码----client_id----refresh_token`）。
-
-## 🧱 技术栈
-
-| 层 | 技术 |
-|---|---|
-| ⚙️ 运行时 | Cloudflare Workers 或 Node.js (Docker) |
-| 🧭 路由 | Hono |
-| 🗄️ 数据库 | Cloudflare D1 或本地 SQLite |
-| 🎨 前端 | 原生 HTML/CSS/JS |
-| 📧 邮件 | Microsoft Graph API |
-| 🚀 部署 | Wrangler 或 Docker Compose |
-
-## 🗂️ 项目结构
-
-```
-src/                     后端源码（Worker）
-├── index.ts             入口 + 路由
-├── auth.ts              HMAC-SHA256 Cookie 鉴权
-├── graph.ts             Graph API 集成
-├── routes/              业务路由（6 个模块）
-└── utils/               加密、校验工具
-server/                  Node.js 入口 + SQLite/D1 兼容层
-public/                  前端（静态 SPA）
-migrations/              D1 数据库建表
-Dockerfile               Docker 镜像
-docker-compose.yml       服务器编排与数据持久化
-tools/                   辅助脚本
+```bash
+docker compose ps
 ```
 
-## 💰 免费额度
+查看启动日志：
 
-| 资源 | 免费额度 | 够用？ |
-|------|----------|:------:|
-| ⚡ Workers 请求 | 10 万/天 | ✅ |
-| ⏱️ CPU 时间 | 10ms/请求 | ✅ |
-| 🌐 外部请求 | 50/次 | ✅ (单账号单请求) |
-| 💾 D1 存储 | 5 GB | ✅ |
+```bash
+docker compose logs --tail=200 outlook-email
+```
 
-## 🗺️ 路线图
+检查服务是否正常：
 
-**核心功能（已实现）**
+```bash
+curl http://127.0.0.1:8787/healthz
+```
 
-- [x] 🔐 一键 OAuth 授权 & Token 自动续期
-- [x] 👤 邮箱账号管理（增 / 删 / 改 / 查、测试连接）
-- [x] 🗂️ 分组管理（自定义颜色、按分组与状态筛选）
-- [x] 📦 批量导入 / 导出 / 删除 / 移组
-- [x] 📤 单条 / 选中导出
-- [x] 📨 邮件阅读（实时收件、搜索、HTML 渲染）
-- [x] 📁 文件夹切换（收件箱 / 垃圾箱 / 已删除）
-- [x] 🔀 聚合视图（收件箱 + 垃圾箱合并按时间排序，找验证码神器）
-- [x] 📄 分页加载（加载更多）
-- [x] 📭 临时邮箱（集成 GPTMail）
-- [x] 🎨 主题切换 + 圆形扫掠过渡 + 呼吸光晕
-- [x] 🔑 对外 API + API Key（免登录拉取邮件，自动化取验证码，见 [API 文档](./docs/API.md)）
-- [x] 🗑️ 删除邮件（单条 / 批量，软删除到「已删除」）
-- [x] 📎 附件下载
-- [x] 🏷️ 标签系统（一个账号多标签，跨分组筛选）
-- [x] ⏰ 定时刷新 Token（Cron Trigger，可配间隔/批量，自动保活账号）
-- [x] 🤖 Telegram 推送新邮件（Cron 轮询，新邮件实时推送到 Telegram，可配间隔）
-- [x] 🧭 界面打磨（页面级工具栏、仪表盘健康度卡片、设置页响应式网格、账号表分页、可搜索账号下拉）
-- [x] 🌐 界面国际化（默认中文，一键切换 English）
+正常情况下会返回：
 
-**计划中（欢迎 PR）**
+```json
+{"ok":true}
+```
 
-- [ ] 🔔 更多推送渠道（企业微信 / 钉钉等）
+首次启动时，程序会自动：
 
-> ⚠️ 受 Cloudflare Workers 平台限制，以下功能无法实现：IMAP（Gmail / QQ / 163 等非微软邮箱）、SMTP 转发、HTTP/SOCKS5 代理。
+1. 创建 `data/` 数据目录
+2. 创建 SQLite 数据库
+3. 执行尚未运行的数据库迁移
+4. 启动 Web 服务和后台定时任务
 
-## ⚠️ 免责声明
+数据库默认保存在：
 
-本项目仅供个人学习和管理自己的邮箱使用。请确保你对所管理的邮箱账号拥有合法授权，不得用于未授权访问他人邮箱或其他违法用途。默认 Client ID 为 Mozilla Thunderbird 公开 ID，仅供快速体验，正式使用建议[注册自己的 Azure 应用](./docs/GUIDE.md#自己注册-azure-应用)。使用者应自行承担因不当使用产生的一切法律责任，作者不承担任何责任。
+```text
+./data/outlook-email.db
+```
 
-## 🙏 致谢
+### 5. 登录后台
 
-本项目基于 [xiaozhi349/outlookEmail](https://github.com/xiaozhi349/outlookEmail) 改造而来。原项目为 Python Flask + SQLite 实现，本项目将其迁移至 Cloudflare Workers + D1，并重写了前后端代码。感谢原作者的工作。
+完成反向代理后，打开：
 
-## 友情链接
+```text
+https://mail.example.com
+```
 
-[LINUX DO](https://linux.do/) —— 新的理想型社区，技术爱好者的聚集地。
+使用 `.env` 中的 `ADMIN_PASSWORD` 登录。
 
-## 📜 许可证
+第一次成功登录后，密码哈希会保存到数据库。以后修改登录密码请在后台系统设置中操作，仅修改 `.env` 中的 `ADMIN_PASSWORD` 不一定会覆盖数据库里已有的密码。
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-blue.svg)](./LICENSE)
+## 添加 Outlook 邮箱
 
-基于 **GPL-3.0** 协议开源。你可以自由使用、修改和分发本项目，但任何分发的衍生作品也必须以 GPL-3.0 协议开源并提供完整源代码。
+登录后台后：
+
+1. 打开“账号管理”
+2. 点击“添加账号”
+3. 选择“一键授权”
+4. 在微软登录窗口中登录目标邮箱
+5. 同意授权
+6. 授权信息自动回填后保存
+
+支持：
+
+- Outlook.com
+- Hotmail.com
+- Live.com
+- 其他可以使用 Microsoft Graph API 的微软个人邮箱
+
+也可以批量导入，默认格式为：
+
+```text
+邮箱----密码----client_id----refresh_token
+```
+
+详细接口说明见 [API 文档](./docs/API.md)。
+
+## 配置 HTTPS 反向代理
+
+Nginx 示例：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name mail.example.com;
+
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+`.env` 中必须对应填写：
+
+```dotenv
+PUBLIC_URL=https://mail.example.com
+BIND_ADDRESS=127.0.0.1
+APP_PORT=8787
+```
+
+如果使用自己创建的 Azure 应用，需要在 Azure 应用中添加以下重定向 URI：
+
+```text
+https://mail.example.com/api/oauth/callback
+```
+
+完整部署和迁移说明见 [Docker 部署文档](./docs/DOCKER.md)。
+
+## 更新
+
+项目没有使用远程预构建镜像。更新时需要拉取最新代码并在服务器上重新构建镜像。
+
+### 标准更新流程
+
+进入项目目录：
+
+```bash
+cd cf-outlook-email
+```
+
+先备份数据：
+
+```bash
+docker compose stop
+tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+docker compose start
+```
+
+拉取最新代码：
+
+```bash
+git pull --ff-only
+```
+
+重新构建并启动：
+
+```bash
+docker compose up -d --build --remove-orphans
+```
+
+确认更新成功：
+
+```bash
+docker compose ps
+docker compose logs --tail=200 outlook-email
+curl http://127.0.0.1:8787/healthz
+```
+
+容器启动时会自动执行新增的数据库迁移，不需要手动修改 SQLite 数据库。
+
+### 查看当前版本
+
+```bash
+git log -1 --oneline
+```
+
+### 更新失败怎么办
+
+先查看日志：
+
+```bash
+docker compose logs --tail=300 outlook-email
+```
+
+如果新版本无法启动，可以切回更新前的 Git 提交，再重新构建：
+
+```bash
+git log --oneline -10
+git checkout 更新前的提交ID
+docker compose up -d --build --remove-orphans
+```
+
+确认问题解决后，再切回主分支：
+
+```bash
+git checkout main
+```
+
+如果数据库也需要回退，请使用更新前创建的数据备份恢复。
+
+## 备份和恢复
+
+### 备份
+
+SQLite 使用 WAL 模式。为了保证备份完整，建议短暂停止容器并备份整个 `data/` 目录：
+
+```bash
+cd cf-outlook-email
+docker compose stop
+tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+docker compose start
+```
+
+备份文件中可能包含：
+
+- 登录密码哈希
+- Outlook Refresh Token
+- API Key
+- Telegram 配置
+- 邮箱和分组数据
+
+请把备份存放在安全位置，不要上传到公开网盘或 GitHub。
+
+### 恢复
+
+停止服务：
+
+```bash
+cd cf-outlook-email
+docker compose stop
+```
+
+保留当前数据：
+
+```bash
+mv data data.before-restore
+```
+
+恢复备份：
+
+```bash
+tar -xzf ../cf-outlook-email-data-日期时间.tar.gz
+```
+
+重新启动：
+
+```bash
+docker compose up -d
+docker compose logs --tail=200 outlook-email
+curl http://127.0.0.1:8787/healthz
+```
+
+恢复时必须恢复完整的 `data/` 目录，不要只复制 `outlook-email.db` 而忽略可能存在的 WAL/SHM 文件。
+
+## 常用命令
+
+### 查看状态
+
+```bash
+docker compose ps
+```
+
+### 查看实时日志
+
+```bash
+docker compose logs -f --tail=200 outlook-email
+```
+
+### 停止服务
+
+```bash
+docker compose stop
+```
+
+### 启动服务
+
+```bash
+docker compose start
+```
+
+### 重启服务
+
+```bash
+docker compose restart outlook-email
+```
+
+### 重新构建
+
+```bash
+docker compose up -d --build
+```
+
+### 完全停止并删除容器
+
+```bash
+docker compose down
+```
+
+`docker compose down` 不会删除绑定挂载的 `./data` 目录，但执行前仍建议先备份。
+
+## 环境变量
+
+| 变量 | 是否必填 | 默认值 | 用途 |
+|---|:---:|---|---|
+| `ADMIN_PASSWORD` | 是 | 无 | 管理后台初始密码 |
+| `COOKIE_SECRET` | 是 | 无 | 登录 Cookie 签名密钥 |
+| `PUBLIC_URL` | 推荐填写 | 根据请求头推导 | 公网访问地址、OAuth 回调和安全 Cookie |
+| `APP_PORT` | 否 | `8787` | 映射到宿主机的端口 |
+| `BIND_ADDRESS` | 否 | `127.0.0.1` | 宿主机监听地址 |
+| `GPTMAIL_API_KEY` | 否 | 无 | GPTMail API Key |
+
+注意：
+
+- 缺少 `ADMIN_PASSWORD` 或 `COOKIE_SECRET` 时，容器会拒绝启动。
+- `PUBLIC_URL` 只能包含协议、域名和可选端口，不能包含路径、参数或锚点。
+- 修改 `COOKIE_SECRET` 会使所有现有登录会话失效。
+- 不要提交 `.env` 和 `data/`。
+
+## 后台任务
+
+Docker 容器中运行一个长驻 Node.js 服务：
+
+- 每 5 分钟唤醒 Token 刷新调度器
+- 每 5 分钟唤醒 Telegram 新邮件推送调度器
+- 每 5 秒推进一次后台批量检测任务
+
+是否真正刷新或推送，由后台系统设置中的开关、任务间隔和批量大小决定。
+
+自动刷新不能保证 Token 永远有效。用户撤销授权、微软风控、账号异常或应用权限变化都可能导致 Token 失效。
+
+## 从 Cloudflare D1 迁移
+
+如果以前使用 Cloudflare Workers + D1 版本，可以把现有账号、分组、设置和推送状态导入 Docker SQLite。
+
+迁移文件中包含 Refresh Token、API Key 等敏感信息，而且导入只允许写入空数据库。请按照 [Docker 部署文档中的迁移步骤](./docs/DOCKER.md#2-从-cloudflare-d1-迁移已有数据) 操作。
+
+## 技术结构
+
+```text
+浏览器
+  ↓
+Nginx / Caddy（HTTPS）
+  ↓
+Docker Compose
+  ↓
+Node.js + Hono
+  ├── 前端静态文件
+  ├── Microsoft Graph API
+  ├── 后台定时任务
+  └── SQLite：./data/outlook-email.db
+```
+
+主要目录：
+
+```text
+server/                  Node.js 服务入口和 SQLite 兼容层
+src/                     后端业务逻辑和 API 路由
+public/                  前端静态文件
+migrations/              数据库迁移
+Dockerfile               Docker 镜像构建配置
+docker-compose.yml       容器、端口和数据目录配置
+docker-entrypoint.sh     容器启动脚本
+.env.example             环境变量示例
+docs/                    Docker、API 和其他说明文档
+```
+
+## 安全建议
+
+- 使用足够强的后台登录密码
+- 使用随机且长期固定的 `COOKIE_SECRET`
+- 生产环境必须使用 HTTPS
+- 默认保持 `BIND_ADDRESS=127.0.0.1`
+- 不要公开 `.env`、`data/` 和数据库备份
+- 定期备份整个 `data/` 目录
+- 只添加你本人拥有或明确授权管理的邮箱
+- 正式使用建议注册自己的 Azure 应用
+
+## 相关文档
+
+- [Docker 详细部署与 D1 迁移](./docs/DOCKER.md)
+- [外部 API 文档](./docs/API.md)
+- [Azure OAuth 配置参考](./docs/GUIDE.md#自己注册-azure-应用)
+- [English README](./README_EN.md)
+
+## 免责声明
+
+本项目仅供个人学习和管理自己拥有或已获授权的邮箱。不得用于未授权访问他人邮箱、窃取邮件、绕过访问控制或其他违法用途。使用者应自行承担部署和使用本项目产生的责任。
+
+## 许可证
+
+本项目使用 [GPL-3.0](./LICENSE) 协议开源。你可以使用、修改和分发本项目，但公开分发的衍生版本也必须按照 GPL-3.0 提供完整源代码。
