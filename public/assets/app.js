@@ -1199,20 +1199,160 @@ window.addEventListener('message', function(e) {
 });
 
 function showImportModal() {
-  showModal(t('批量导入'), `
+  let overlay;
+  overlay = showModal(t('批量导入'), `
     <div class="form-group"><label class="form-label">${t('分组')}</label><select class="form-select" id="mImpGroup">${state.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div>
-    <div class="form-group"><label class="form-label">${t('账号数据 (每行一个: 邮箱----密码----client_id----refresh_token)')}</label><textarea class="form-textarea" id="mImpData" rows="8" placeholder="email----password----client_id----refresh_token"></textarea></div>
+    <div class="form-group">
+      <label class="form-label">${t('从文件导入')}</label>
+      <div class="import-file-actions">
+        <button class="btn" type="button" data-import-files>${t('选择 TXT 文件')}</button>
+        <button class="btn" type="button" data-import-folder>${t('选择文件夹')}</button>
+        <input type="file" accept=".txt,text/plain" multiple hidden data-import-file-input>
+        <input type="file" accept=".txt,text/plain" multiple webkitdirectory hidden data-import-folder-input>
+      </div>
+      <div class="import-file-hint">${t('可选择一个或多个 TXT，也可以选择整个文件夹；文件内容会替换下方预览')}</div>
+      <div class="import-file-summary" data-import-summary></div>
+    </div>
+    <div class="form-group"><label class="form-label">${t('账号数据 (每行一个: 邮箱----密码----client_id----refresh_token)')}</label><textarea class="form-textarea import-preview" id="mImpData" rows="10" placeholder="email----password----client_id----refresh_token"></textarea></div>
   `, async () => {
-    const data = document.getElementById('mImpData').value.trim();
+    const data = overlay.querySelector('#mImpData').value.trim();
     if (!data) { toast(t('请输入账号数据'), 'error'); return false; }
-    const res = await api('/accounts', { method: 'POST', body: JSON.stringify({
+
+    const res = await api('/accounts/import', { method: 'POST', body: JSON.stringify({
       account_string: data,
-      group_id: parseInt(document.getElementById('mImpGroup').value),
+      group_id: parseInt(overlay.querySelector('#mImpGroup').value, 10),
     })});
-    if (res?.success) { toast(res.message || t('导入成功')); navigate('accounts'); return true; }
-    toast(res?.error?.message || t('导入失败'), 'error');
-    return false;
+    if (!res?.success) {
+      toast(res?.error?.message || t('导入失败'), 'error');
+      return false;
+    }
+
+    if (res.data.added > 0) navigate('accounts');
+    if (res.data.duplicates > 0 || res.data.invalid > 0) showAccountImportResult(res.data);
+    else toast(res.message || t('导入成功'));
+    return true;
+  }, { modalClass: 'modal-wide' });
+
+  const fileInput = overlay.querySelector('[data-import-file-input]');
+  const folderInput = overlay.querySelector('[data-import-folder-input]');
+  overlay.querySelector('[data-import-files]').addEventListener('click', () => fileInput.click());
+  overlay.querySelector('[data-import-folder]').addEventListener('click', () => folderInput.click());
+  fileInput.addEventListener('change', async () => {
+    await readAccountImportFiles(fileInput.files, overlay);
+    fileInput.value = '';
   });
+  folderInput.addEventListener('change', async () => {
+    await readAccountImportFiles(folderInput.files, overlay);
+    folderInput.value = '';
+  });
+  overlay.querySelector('#mImpData').addEventListener('input', () => updateAccountImportPreview(overlay));
+  updateAccountImportPreview(overlay);
+}
+
+async function readAccountImportFiles(fileList, overlay) {
+  const readId = String((parseInt(overlay.dataset.importReadId || '0', 10) || 0) + 1);
+  overlay.dataset.importReadId = readId;
+  delete overlay.dataset.importReading;
+
+  const files = Array.from(fileList || []);
+  const textFiles = files
+    .filter(file => file.name.toLowerCase().endsWith('.txt'))
+    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
+  const ignored = files.length - textFiles.length;
+
+  if (!textFiles.length) {
+    updateAccountImportPreview(overlay);
+    toast(t('没有找到可读取的 TXT 文件'), 'error');
+    return;
+  }
+  overlay.dataset.importReading = '1';
+  updateAccountImportPreview(overlay, { reading: true });
+  try {
+    const contents = await Promise.all(textFiles.map(file => file.text()));
+    if (overlay.dataset.importReadId !== readId) return;
+
+    let empty = 0;
+    const merged = contents.map(content => content.replace(/^﻿/, '').replace(/\r\n?/g, '\n').trim())
+      .filter(content => {
+        if (content) return true;
+        empty++;
+        return false;
+      })
+      .join('\n');
+
+    overlay.querySelector('#mImpData').value = merged;
+    overlay.dataset.importFiles = String(textFiles.length);
+    overlay.dataset.importIgnored = String(ignored);
+    overlay.dataset.importEmpty = String(empty);
+  } catch {
+    if (overlay.dataset.importReadId === readId) {
+      toast(t('读取文件失败，请重新选择'), 'error');
+    }
+  } finally {
+    if (overlay.dataset.importReadId === readId) {
+      delete overlay.dataset.importReading;
+      updateAccountImportPreview(overlay);
+    }
+  }
+}
+
+function updateAccountImportPreview(overlay, options = {}) {
+  const textarea = overlay.querySelector('#mImpData');
+  const summary = overlay.querySelector('[data-import-summary]');
+  const confirmBtn = overlay.querySelector('[data-modal-confirm]');
+  const text = textarea.value;
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\n|\r/).filter(line => line.trim()).length;
+  const reading = options.reading || overlay.dataset.importReading === '1';
+  const files = parseInt(overlay.dataset.importFiles || '0', 10);
+  const ignored = parseInt(overlay.dataset.importIgnored || '0', 10);
+  const empty = parseInt(overlay.dataset.importEmpty || '0', 10);
+
+  const parts = [];
+  if (reading) parts.push(t('正在读取文件...'));
+  else if (files) parts.push(t('已读取 {files} 个文件', { files }));
+  if (ignored) parts.push(t('忽略 {n} 个非 TXT 文件', { n: ignored }));
+  if (empty) parts.push(t('跳过 {n} 个空文件', { n: empty }));
+  parts.push(t('当前 {lines} 行，{chars} 个字符', { lines, chars: text.length }));
+
+  summary.textContent = parts.join(' · ');
+  summary.classList.remove('is-error');
+  confirmBtn.disabled = reading;
+}
+
+function accountImportReasonText(reason, field) {
+  const reasons = {
+    format: t('格式错误，应为四段账号数据'),
+    invalid_email: t('邮箱格式不正确'),
+    email_too_long: t('邮箱过长'),
+    password_too_long: t('密码过长'),
+    client_id_required: t('Client ID 不能为空'),
+    client_id_too_long: t('Client ID 过长'),
+    refresh_token_required: t('Refresh Token 不能为空'),
+    refresh_token_too_long: t('Refresh Token 过长'),
+    control_character: t('字段包含无效控制字符'),
+    duplicate_in_input: t('本次导入中重复'),
+    already_exists: t('邮箱已存在'),
+  };
+  const text = reasons[reason] || t('未知错误');
+  return field ? `${text} (${field})` : text;
+}
+
+function showAccountImportResult(result) {
+  const skipped = (result.results || []).filter(item => item.status !== 'added');
+  const rows = skipped.map(item => `
+    <div class="import-result-row">
+      <div><strong>${t('第 {n} 行', { n: item.line })}</strong>${item.email ? `<div class="import-result-email">${esc(item.email)}</div>` : ''}</div>
+      <span class="import-result-reason ${item.status === 'duplicate' ? 'is-duplicate' : 'is-invalid'}">${esc(accountImportReasonText(item.reason, item.field))}</span>
+    </div>
+  `).join('');
+  showModal(t('导入结果'), `
+    <div class="import-result-summary">
+      <div><strong>${result.added}</strong><span>${t('新增')}</span></div>
+      <div><strong>${result.duplicates}</strong><span>${t('重复')}</span></div>
+      <div><strong>${result.invalid}</strong><span>${t('无效')}</span></div>
+    </div>
+    <div class="import-result-list">${rows || `<div class="import-result-empty">${t('没有需要处理的错误行')}</div>`}</div>
+  `, async () => true, { modalClass: 'modal-wide', hideCancel: true, confirmText: t('关闭') });
 }
 
 async function showEditAccountModal(id) {
@@ -2245,26 +2385,28 @@ async function saveSettings() {
 }
 
 // ========== Modal Helpers ==========
-function showModal(title, bodyHtml, onConfirm) {
+function showModal(title, bodyHtml, onConfirm, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  const modalClass = options.modalClass ? ` ${esc(options.modalClass)}` : '';
+  const confirmText = options.confirmText || t('确定');
   overlay.innerHTML = `
-    <div class="modal">
+    <div class="modal${modalClass}">
       <div class="modal-header">
         <h3>${title}</h3>
         <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
       </div>
       <div class="modal-body">${bodyHtml}</div>
       <div class="modal-footer">
-        <button class="btn" onclick="this.closest('.modal-overlay').remove()">${t('取消')}</button>
-        <button class="btn btn-primary" id="modalConfirmBtn">${t('确定')}</button>
+        ${options.hideCancel ? '' : `<button class="btn" onclick="this.closest('.modal-overlay').remove()">${t('取消')}</button>`}
+        <button class="btn btn-primary" data-modal-confirm>${confirmText}</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
-  // Intentionally NOT closing on backdrop click — only × or Cancel close the modal
+  // Intentionally NOT closing on backdrop click — only × or footer buttons close the modal
 
-  const confirmBtn = document.getElementById('modalConfirmBtn');
+  const confirmBtn = overlay.querySelector('[data-modal-confirm]');
   confirmBtn.addEventListener('click', async () => {
     confirmBtn.disabled = true;
     confirmBtn.textContent = t('处理中...');
@@ -2273,9 +2415,10 @@ function showModal(title, bodyHtml, onConfirm) {
       overlay.remove();
     } else {
       confirmBtn.disabled = false;
-      confirmBtn.textContent = t('确定');
+      confirmBtn.textContent = confirmText;
     }
   });
+  return overlay;
 }
 
 // Render a row of tag badges (small tag icon + name, tinted by tag color)

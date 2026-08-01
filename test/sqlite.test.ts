@@ -43,6 +43,28 @@ describe('SQLite D1 compatibility layer', () => {
     expect(await query<{ name: string }>(d1, 'SELECT name FROM tags')).toEqual([{ name: 'work' }]);
   });
 
+  it('returns rows from INSERT statements that use RETURNING', async () => {
+    const { db } = createDatabase();
+    applyMigrations(db, resolve('migrations'));
+    const d1 = db as unknown as D1Database;
+
+    const results = await batchRun<{ email: string }>(d1, [
+      {
+        sql: 'INSERT INTO accounts (email, client_id, refresh_token) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING RETURNING email',
+        params: ['returning@example.com', 'client', 'token'],
+      },
+      {
+        sql: 'INSERT INTO accounts (email, client_id, refresh_token) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING RETURNING email',
+        params: ['returning@example.com', 'other-client', 'other-token'],
+      },
+    ]);
+
+    expect(results.map((result) => result.results)).toEqual([
+      [{ email: 'returning@example.com' }],
+      [],
+    ]);
+  });
+
   it('rolls back all statements when a batch fails', async () => {
     const { db } = createDatabase();
     applyMigrations(db, resolve('migrations'));

@@ -362,6 +362,21 @@ describe('frontend account count and settings layout', () => {
     expect(appSource).toContain('onclick="goBackFromEmails()"');
     expect(appSource.indexOf('onclick="refreshEmails()"')).toBeLessThan(appSource.indexOf('onclick="goBackFromEmails()"'));
   });
+
+  it('imports accounts from multiple TXT files or a selected folder without multipart upload', async () => {
+    const appSource = await readFile(new URL('../public/assets/app.js', import.meta.url), 'utf8');
+
+    expect(appSource).toContain('data-import-file-input');
+    expect(appSource).toContain('multiple webkitdirectory');
+    expect(appSource).toContain('file.text()');
+    expect(appSource).not.toContain('ACCOUNT_IMPORT_MAX_FILES');
+    expect(appSource).not.toContain('ACCOUNT_IMPORT_MAX_CHARS');
+    expect(appSource).not.toContain('ACCOUNT_IMPORT_MAX_LINES');
+    expect(appSource).not.toContain('已超过单次导入限制');
+    expect(appSource).toContain('overlay.dataset.importReadId !== readId');
+    expect(appSource).toContain("api('/accounts/import'");
+    expect(appSource).not.toContain('new FormData');
+  });
 });
 
 describe('static asset deployment cache policy', () => {
@@ -372,9 +387,9 @@ describe('static asset deployment cache policy', () => {
 
     expect(serverSource).toContain("c.header('Cache-Control', 'no-cache')");
     expect(serverSource).not.toContain('max-age=3600');
-    expect(indexSource).toContain('/assets/style.css?v=20260729-5');
-    expect(indexSource).toContain('/assets/i18n.js?v=20260729-5');
-    expect(indexSource).toContain('/assets/app.js?v=20260729-5');
-    expect(loginSource).toContain('/assets/i18n.js?v=20260729-5');
+    expect(indexSource).toContain('/assets/style.css?v=20260801-1');
+    expect(indexSource).toContain('/assets/i18n.js?v=20260801-1');
+    expect(indexSource).toContain('/assets/app.js?v=20260801-1');
+    expect(loginSource).toContain('/assets/i18n.js?v=20260801-1');
   });
 });
