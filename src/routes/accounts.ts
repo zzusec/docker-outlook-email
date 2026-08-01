@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { Env, AccountRow } from '../types';
 import { query, first, run, batchRun, chunk, getSetting, D1_MAX_BOUND_PARAMS } from '../db';
-import { ok, badRequest, notFound } from '../response';
+import { ok, fail, badRequest, notFound } from '../response';
 import { maskToken, isValidEmail } from '../utils/validation';
+import { AccountImportRequestError, importAccounts } from '../accountImport';
 import { getMailAccessToken, getInboxTotal, isPermanentTokenFailure, type GraphError } from '../graph';
 import {
   probeAccount,
@@ -26,6 +27,24 @@ const MAX_CONNECTION_TESTS_PER_REQUEST = 10;
 const MAX_INBOX_COUNTS_PER_REQUEST = 20;
 // Guard rail for selection-based background jobs (the id list is stored as JSON)
 const MAX_SELECTED_JOB_ACCOUNTS = 20000;
+
+function importGroupId(value: unknown, allowNumericString = false): number {
+  if (value === undefined) return 1;
+  const normalized = allowNumericString && typeof value === 'string' && /^\d+$/.test(value.trim())
+    ? Number(value)
+    : value;
+  if (!Number.isInteger(normalized) || (normalized as number) <= 0) {
+    throw new AccountImportRequestError('INVALID_GROUP_ID', 'group_id 必须是正整数');
+  }
+  return normalized as number;
+}
+
+function accountImportFailure(error: unknown): Response {
+  if (error instanceof AccountImportRequestError) {
+    return fail(error.code, error.message, error.status);
+  }
+  throw error;
+}
 
 // Mask account for list responses
 function safeAccount(acc: AccountRow) {
@@ -114,7 +133,40 @@ accounts.get('/', async (c) => {
   return ok(data);
 });
 
-// POST /api/accounts (supports batch import)
+// POST /api/accounts/import - strict JSON batch import with per-line results
+accounts.post('/import', async (c) => {
+  const contentType = c.req.header('Content-Type') ?? '';
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    return fail('UNSUPPORTED_MEDIA_TYPE', '请求必须使用 application/json', 415);
+  }
+
+  let rawBody: unknown;
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return fail('INVALID_JSON', '请求体必须是有效 JSON');
+  }
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return fail('INVALID_REQUEST', '请求体必须是 JSON 对象');
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  if (typeof body.account_string !== 'string') {
+    return fail('INVALID_ACCOUNT_STRING', 'account_string 必须是字符串');
+  }
+
+  try {
+    const result = await importAccounts(c.env.DB, body.account_string, importGroupId(body.group_id));
+    return ok(
+      result,
+      `导入完成：新增 ${result.added}，重复 ${result.duplicates}，无效 ${result.invalid}`
+    );
+  } catch (error) {
+    return accountImportFailure(error);
+  }
+});
+
+// POST /api/accounts (supports legacy batch import)
 accounts.post('/', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     account_string?: string;
@@ -122,39 +174,28 @@ accounts.post('/', async (c) => {
     client_id?: string;
     refresh_token?: string;
     password?: string;
-    group_id?: number;
+    group_id?: number | string;
     remark?: string;
     country?: string;
     ip_type?: string;
   };
 
-  const groupId = body.group_id ?? 1;
-
-  // Batch import mode
-  if (body.account_string) {
-    const lines = body.account_string.trim().split('\n');
-    let added = 0;
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const parts = trimmed.split('----');
-      if (parts.length >= 4) {
-        const [email, password, clientId, refreshToken] = parts;
-        try {
-          await run(
-            c.env.DB,
-            'INSERT INTO accounts (email, password, client_id, refresh_token, group_id) VALUES (?, ?, ?, ?, ?)',
-            [email.trim(), password.trim(), clientId.trim(), refreshToken.trim(), groupId]
-          );
-          added++;
-        } catch {
-          // Duplicate email, skip
-        }
-      }
+  // Legacy batch import mode: share the strict importer, but keep the old
+  // success payload and the added=0 error behavior for existing clients.
+  if (Object.prototype.hasOwnProperty.call(body, 'account_string')) {
+    if (typeof body.account_string !== 'string') {
+      return fail('INVALID_ACCOUNT_STRING', 'account_string 必须是字符串');
     }
-    if (added > 0) return ok({ added }, `成功添加 ${added} 个账号`);
-    return badRequest('没有新账号被添加（可能格式错误或已存在）');
+    try {
+      const result = await importAccounts(c.env.DB, body.account_string, importGroupId(body.group_id, true));
+      if (result.added > 0) return ok({ added: result.added }, `成功添加 ${result.added} 个账号`);
+      return badRequest('没有新账号被添加（可能格式错误或已存在）');
+    } catch (error) {
+      return accountImportFailure(error);
+    }
   }
+
+  const groupId = body.group_id ?? 1;
 
   // Single add mode
   const email = body.email?.trim();
@@ -297,7 +338,7 @@ accounts.post('/batch', async (c) => {
       const email = line.slice(0, delimiter).trim();
       const token = line.slice(delimiter + 4).trim();
       const key = email.toLowerCase();
-      if (!isValidEmail(email) || !token || token.length > 8192 || /[ -]/.test(token)) {
+      if (!isValidEmail(email) || !token || token.length > 8192 || /[\x00-\x1F\x7F]/.test(token)) {
         return badRequest('Token 数据包含无效邮箱或 Token');
       }
       if (tokenMap.has(key)) return badRequest('Token 数据包含重复邮箱');

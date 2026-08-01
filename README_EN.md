@@ -152,11 +152,19 @@ After signing in:
 5. Approve access
 6. Save the automatically populated credentials
 
-Bulk import format:
+Click **Batch Import** to add accounts by:
+
+- Pasting account text
+- Selecting one or more `.txt` files
+- Selecting an entire folder and reading the `.txt` files inside it
+
+Each line must use this format:
 
 ```text
 email----password----client_id----refresh_token
 ```
+
+The selected files are merged into an editable preview before submission. The application does not impose a per-import cap on TXT file count, account lines, or total text length. Duplicate and invalid lines are skipped and shown in a categorized result summary.
 
 See [API documentation](./docs/API.md) for external integrations.
 

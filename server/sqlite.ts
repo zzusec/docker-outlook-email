@@ -61,7 +61,7 @@ export class SqlitePreparedStatement {
   }
 
   execute<T = Record<string, unknown>>() {
-    if (/^\s*(?:SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(this.sql)) {
+    if (/^\s*(?:SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(this.sql) || /\bRETURNING\b/i.test(this.sql)) {
       return this.executeQuery<T>();
     }
     return this.executeMutation();
