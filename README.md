@@ -1,52 +1,80 @@
 # cf-outlook-email
 
-一个部署在自己服务器上的 **Outlook / Hotmail 邮箱集中管理后台**。
+一个自托管的 **Outlook / Hotmail 邮箱集中管理后台**。
 
-项目通过 Microsoft Graph API 读取已授权邮箱，可以在一个网页里管理多个 Outlook、Hotmail、Live 邮箱，批量检查账号状态、刷新 Token、查看邮件、搜索验证码，并提供 Telegram 推送和外部 API。
+项目通过 Microsoft Graph API 读取已授权邮箱，使用 **Docker Compose + Node.js + Hono + SQLite** 运行。账号资料、系统设置和任务状态保存在自己的服务器上，邮件内容按需从微软接口读取。
 
-本仓库当前以 **Docker Compose + Node.js + SQLite** 方式部署，数据保存在服务器本地。
+> 本项目不是邮箱注册工具，也不是邮件服务器。只能管理你本人拥有或已明确授权使用的邮箱账号。
 
-> 这不是邮箱注册工具，也不是邮件服务器。项目只能访问你主动添加并完成授权的微软邮箱。请确保你对所有账号拥有合法使用权限。
+## 功能
 
-## 项目能做什么
+### 邮箱账号管理
 
-- 集中管理多个 Outlook、Hotmail、Live 邮箱
-- 通过微软 OAuth 一键添加邮箱
-- 批量导入、导出、删除、移动和筛选账号
-- 批量检测账号状态、刷新 Token
-- 查看收件箱、垃圾邮件、已删除邮件
-- 聚合多个文件夹并按时间查看邮件
-- 搜索邮件、提取验证码、下载附件
-- 按分组、标签、状态、国家和 IP 类型筛选账号
-- 统计每个邮箱的邮件数量
-- 后台执行批量检测和刷新，关闭网页后任务仍会继续
-- 定时刷新 Token
-- 将新邮件推送到 Telegram
-- 通过 API Key 调用外部接口读取邮箱和验证码
-- 使用 GPTMail 创建临时邮箱
-- 中文、英文界面以及深色、浅色主题
+- 集中管理 Outlook、Hotmail、Live 等微软邮箱
+- 单个添加、OAuth 授权和批量导入账号
+- 支持粘贴文本、选择多个 TXT、选择整个文件夹导入
+- 大批量账号分块查询和写入，应用层不设置固定文件数、账号行数或文本长度上限
+- 自动识别新增、重复、格式错误和字段错误，并显示分类结果
+- 批量导出、删除、移动分组、启用和停用账号
+- 分组、标签、状态、邮箱和备注筛选
+- 保存国家、IP 类型等账号信息；外部 API 支持按这些字段筛选
 
-## 页面预览
+批量导入格式：
 
-| 深色模式 | 浅色模式 |
-|:---:|:---:|
-| ![深色模式](./docs/preview.png) | ![浅色模式](./docs/preview-light.png) |
+```text
+邮箱----密码----client_id----refresh_token
+```
+
+实际可处理的数据量仍取决于浏览器内存、反向代理请求体限制和服务器资源。
+
+### 邮件管理
+
+- 查看收件箱、垃圾邮件和已删除邮件
+- “全部”视图按时间聚合收件箱和垃圾邮件
+- 查看纯文本或 HTML 邮件正文
+- 搜索邮件；通过外部 API 提取验证码
+- 下载邮件附件
+- 单封或批量将邮件移入“已删除邮件”文件夹
+- 统计每个邮箱的收件箱邮件数
+
+> 删除邮件需要微软应用具有 `Mail.ReadWrite` 权限。只有 `Mail.Read` 权限时可以读取，但可能无法删除。
+
+### Token 与后台任务
+
+- 测试账号连接和授权状态
+- 批量刷新 Microsoft Refresh Token
+- 自动保存微软轮换后的新 Refresh Token
+- 后台执行批量检测、Token 刷新和邮件数统计
+- 关闭或刷新浏览器后，已创建的后台任务继续运行
+- 可配置定时刷新 Token
+
+### 推送与接口
+
+- Telegram 新邮件推送
+- API Key 鉴权的外部接口
+- 通过接口读取账号、邮件和验证码
+- GPTMail 临时邮箱集成
+- 中文、英文界面
+- 深色、浅色和跟随系统主题
 
 ## 安装
 
-### 1. 准备服务器
+### 1. 准备环境
 
-推荐使用 Linux 服务器，并提前安装：
+推荐使用 Linux 服务器，需要安装：
 
 - Git
 - Docker Engine
 - Docker Compose v2
+- OpenSSL
 
-确认 Docker 可以正常运行：
+确认环境：
 
 ```bash
+git --version
 docker --version
 docker compose version
+openssl version
 ```
 
 ### 2. 下载项目
@@ -56,64 +84,53 @@ git clone https://github.com/zzusec/cf-outlook-email.git
 cd cf-outlook-email
 ```
 
-### 3. 创建配置文件
+### 3. 创建配置
 
 ```bash
 cp .env.example .env
 openssl rand -hex 32
-vim .env
 ```
 
-将 `openssl` 生成的随机字符串填入 `COOKIE_SECRET`，并修改以下配置：
+编辑 `.env`：
 
 ```dotenv
 # 管理后台初始密码
 ADMIN_PASSWORD=请设置一个强密码
 
-# Cookie 签名密钥，填入 openssl rand -hex 32 的输出
+# Cookie 签名密钥，填写 openssl rand -hex 32 的输出
 COOKIE_SECRET=请替换为随机字符串
 
-# 浏览器访问本项目的完整地址，只填写协议和域名，不要添加路径
+# 浏览器实际访问的地址；使用反向代理或 OAuth 时建议明确填写
 PUBLIC_URL=https://mail.example.com
 
 # 宿主机端口
 APP_PORT=8787
 
-# 默认只允许本机访问，适合通过 Nginx/Caddy 反向代理
+# 默认只允许本机访问，由 Nginx/Caddy 对外提供 HTTPS
 BIND_ADDRESS=127.0.0.1
 
-# 可选，也可以登录后台后再填写
+# 可选，也可以登录后台后配置
 # GPTMAIL_API_KEY=
 ```
 
-必须修改：
+配置说明：
 
-- `ADMIN_PASSWORD`
-- `COOKIE_SECRET`
-- `PUBLIC_URL`
+| 变量 | 是否必填 | 默认值 | 用途 |
+|---|:---:|---|---|
+| `ADMIN_PASSWORD` | 是 | 无 | 数据库尚未保存密码哈希时使用的初始登录密码 |
+| `COOKIE_SECRET` | 是 | 无 | 登录 Cookie 签名密钥，生成后应长期保持不变 |
+| `PUBLIC_URL` | 推荐 | 根据请求推导 | 公网访问地址、OAuth 回调地址和安全 Cookie 判断 |
+| `APP_PORT` | 否 | `8787` | 映射到宿主机的端口 |
+| `BIND_ADDRESS` | 否 | `127.0.0.1` | 宿主机监听地址 |
+| `GPTMAIL_API_KEY` | 否 | 无 | GPTMail API Key |
 
-`PUBLIC_URL` 示例：
+注意：
 
-```text
-https://mail.example.com
-```
-
-不要填写：
-
-```text
-https://mail.example.com/
-https://mail.example.com/path
-```
-
-如果只是临时通过服务器 IP 测试，可以设置：
-
-```dotenv
-PUBLIC_URL=http://你的服务器IP:8787
-BIND_ADDRESS=0.0.0.0
-APP_PORT=8787
-```
-
-> 直接开放 `8787` 端口不适合正式使用。生产环境建议保持 `BIND_ADDRESS=127.0.0.1`，再通过 Nginx 或 Caddy 提供 HTTPS。
+- 复制 `.env.example` 后必须替换 `ADMIN_PASSWORD` 和 `COOKIE_SECRET` 的占位文本。程序只检查它们是否为空，不会识别示例占位值；直接使用示例值会导致密码和 Cookie 密钥可预测。
+- 缺少 `ADMIN_PASSWORD` 或 `COOKIE_SECRET` 时，服务会拒绝启动。
+- `PUBLIC_URL` 只能填写协议、主机和可选端口，不能包含业务路径、参数或锚点。
+- 第一次成功登录后，密码哈希会写入 SQLite。以后应在后台修改密码，仅修改 `.env` 不会覆盖数据库中的密码。
+- 修改 `COOKIE_SECRET` 会使现有登录会话全部失效。
 
 ### 4. 构建并启动
 
@@ -121,176 +138,172 @@ APP_PORT=8787
 docker compose up -d --build
 ```
 
-查看容器状态：
+查看状态和日志：
 
 ```bash
 docker compose ps
-```
-
-查看启动日志：
-
-```bash
 docker compose logs --tail=200 outlook-email
 ```
 
-检查服务是否正常：
+健康检查（以下命令假设使用默认的 `APP_PORT=8787`）：
 
 ```bash
-curl http://127.0.0.1:8787/healthz
+curl -fsS http://127.0.0.1:8787/healthz
 ```
 
-正常情况下会返回：
+如果修改了 `APP_PORT`，宿主机健康检查和反向代理上游端口也要改成相同值。容器内部端口始终为 `8787`。
+
+正常返回：
 
 ```json
-{"ok":true}
+{"status":"ok"}
 ```
 
-首次启动时，程序会自动：
+也可以查看 Docker 健康状态：
 
-1. 创建 `data/` 数据目录
-2. 创建 SQLite 数据库
-3. 执行尚未运行的数据库迁移
-4. 启动 Web 服务和后台定时任务
+```bash
+docker inspect --format='{{.State.Health.Status}}' outlook-email
+```
 
-数据库默认保存在：
+正常应输出：
 
 ```text
-./data/outlook-email.db
+healthy
 ```
 
-### 5. 登录后台
+首次启动会自动：
 
-完成反向代理后，打开：
+1. 创建 `./data` 数据目录
+2. 创建 `./data/outlook-email.db`
+3. 执行 `migrations/` 中尚未运行的数据库迁移
+4. 启动 Web 服务和后台调度器
+
+数据映射关系：
 
 ```text
-https://mail.example.com
+宿主机：./data
+容器内：/data
+数据库：./data/outlook-email.db
 ```
 
-使用 `.env` 中的 `ADMIN_PASSWORD` 登录。
+### 5. 配置 HTTPS
 
-第一次成功登录后，密码哈希会保存到数据库。以后修改登录密码请在后台系统设置中操作，仅修改 `.env` 中的 `ADMIN_PASSWORD` 不一定会覆盖数据库里已有的密码。
+生产环境建议保持：
 
-## 添加 Outlook 邮箱
-
-登录后台后：
-
-1. 打开“账号管理”
-2. 点击“添加账号”
-3. 选择“一键授权”
-4. 在微软登录窗口中登录目标邮箱
-5. 同意授权
-6. 授权信息自动回填后保存
-
-支持：
-
-- Outlook.com
-- Hotmail.com
-- Live.com
-- 其他可以使用 Microsoft Graph API 的微软个人邮箱
-
-也可以点击 **“批量导入”**，通过以下方式添加账号：
-
-- 直接粘贴账号文本
-- 一次选择一个或多个 `.txt` 文件
-- 选择整个文件夹，自动读取其中的 `.txt` 文件
-
-每行格式为：
-
-```text
-邮箱----密码----client_id----refresh_token
+```dotenv
+BIND_ADDRESS=127.0.0.1
+APP_PORT=8787
+PUBLIC_URL=https://mail.example.com
 ```
 
-文件内容会先合并到文本框中，可以在提交前检查和编辑。应用不限制单次选择的 TXT 文件数、账号行数或文本总长度；重复账号和格式错误行会自动跳过，并在导入结果中分类显示。
-
-详细接口说明见 [API 文档](./docs/API.md)。
-
-## 配置 HTTPS 反向代理
-
-Nginx 示例：
+然后通过同一台服务器上的 Nginx 或 Caddy 提供 HTTPS。最小 Nginx 代理配置：
 
 ```nginx
-server {
-    listen 443 ssl http2;
-    server_name mail.example.com;
-
-    ssl_certificate /path/to/fullchain.pem;
-    ssl_certificate_key /path/to/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8787;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 
-`.env` 中必须对应填写：
+配置后检查：
+
+```bash
+curl -fsS https://mail.example.com/healthz
+```
+
+如果只是临时通过服务器 IP 测试，可以使用：
 
 ```dotenv
-PUBLIC_URL=https://mail.example.com
-BIND_ADDRESS=127.0.0.1
+PUBLIC_URL=http://服务器IP:8787
+BIND_ADDRESS=0.0.0.0
 APP_PORT=8787
 ```
 
-如果使用自己创建的 Azure 应用，需要在 Azure 应用中添加以下重定向 URI：
+> 不建议在生产环境直接将管理后台的 HTTP 端口暴露到公网。
+
+## 添加 Outlook 邮箱
+
+登录后台后可以通过以下方式添加账号：
+
+- 填写 Client ID 和 Refresh Token
+- 使用默认 Client ID 完成手动授权
+- 使用自己注册的 Azure 应用进行网页一键授权
+- 批量粘贴或读取 TXT 文件
+
+默认提供的 Thunderbird Client ID 可以用于回调地址为 `https://localhost` 的手动授权流程，但不能用于自己网站域名上的 OAuth 回调。
+
+如果需要网页一键授权，请注册自己的 Azure 应用，并添加重定向 URI：
 
 ```text
 https://mail.example.com/api/oauth/callback
 ```
 
-完整部署和迁移说明见 [Docker 部署文档](./docs/DOCKER.md)。
+该项目使用不带 Client Secret 的公共客户端授权流程。Azure 应用需要：
 
-## 更新
+- 账户类型包含个人 Microsoft 账户
+- 允许公共客户端流
+- 不要配置成必须提供 Client Secret 的 Web 机密客户端
+- 授予 `Mail.ReadWrite` 和 `offline_access` 委托权限
 
-项目没有使用远程预构建镜像。更新时需要拉取最新代码并在服务器上重新构建镜像。
+具体配置步骤见 [Azure OAuth 配置参考](./docs/GUIDE.md#自己注册-azure-应用)。
 
-### 标准更新流程
+## 升级
 
-进入项目目录：
+项目镜像在服务器上从源码构建，没有远程预构建镜像。升级时必须拉取代码并重新构建，单独执行 `docker compose pull` 无法完成升级。
+
+### 1. 备份
+
+SQLite 使用 WAL 模式。升级前应停止服务，并备份完整的 `data/` 和 `.env`：
 
 ```bash
-cd cf-outlook-email
+cd /path/to/cf-outlook-email || exit 1
+
+# 记录回退时需要匹配的源码版本
+git rev-parse HEAD || exit 1
+
+# 停止服务，确保 SQLite WAL 完整落盘
+# 备份完成后保持停止，直接进行下一步升级
+docker compose stop || exit 1
+umask 077
+backup="../cf-outlook-email-backup-$(date +%F-%H%M%S).tar.gz"
+tar -czf "$backup" data .env || { docker compose start; exit 1; }
 ```
 
-先备份数据：
+如果备份后决定取消升级，可以执行 `docker compose start` 恢复旧版本服务。
 
-```bash
-docker compose stop
-tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
-docker compose start
+不要只复制 `data/outlook-email.db`，完整数据目录中还可能包含：
+
+```text
+outlook-email.db-wal
+outlook-email.db-shm
 ```
 
-拉取最新代码：
+### 2. 拉取并重建
 
 ```bash
+cd /path/to/cf-outlook-email
 git pull --ff-only
-```
-
-重新构建并启动：
-
-```bash
 docker compose up -d --build --remove-orphans
 ```
 
-确认更新成功：
+`--ff-only` 可以避免服务器意外生成自动合并提交。如果服务器工作区有本地修改，应先处理这些修改，不要直接强制覆盖。
+
+### 3. 验证升级
 
 ```bash
 docker compose ps
 docker compose logs --tail=200 outlook-email
-curl http://127.0.0.1:8787/healthz
-```
-
-容器启动时会自动执行新增的数据库迁移，不需要手动修改 SQLite 数据库。
-
-### 查看当前版本
-
-```bash
+curl -fsS http://127.0.0.1:8787/healthz
+docker inspect --format='{{.State.Health.Status}}' outlook-email
 git log -1 --oneline
 ```
 
-### 更新失败怎么办
+容器启动时会自动执行新增的数据库迁移，不需要手动修改 SQLite 表结构。
+
+### 升级失败
 
 先查看日志：
 
@@ -298,210 +311,119 @@ git log -1 --oneline
 docker compose logs --tail=300 outlook-email
 ```
 
-如果新版本无法启动，可以切回更新前的 Git 提交，再重新构建：
+源码回退不等于数据库回退。如果新版本已经执行数据库迁移，需要完整回退时，应同时恢复：
+
+- 升级前的源码版本
+- 升级前备份的完整 `data/` 目录
+- 对应的 `.env`
+
+不要让两个版本同时使用同一个 SQLite 数据目录。
+
+## 卸载
+
+### 停止服务但保留数据
 
 ```bash
-git log --oneline -10
-git checkout 更新前的提交ID
-docker compose up -d --build --remove-orphans
+cd /path/to/cf-outlook-email
+docker compose down --remove-orphans
 ```
 
-确认问题解决后，再切回主分支：
+该命令会删除容器和 Compose 网络，但不会删除绑定挂载的：
 
-```bash
-git checkout main
+```text
+./data
 ```
 
-如果数据库也需要回退，请使用更新前创建的数据备份恢复。
-
-## 备份和恢复
-
-### 备份
-
-SQLite 使用 WAL 模式。为了保证备份完整，建议短暂停止容器并备份整个 `data/` 目录：
-
-```bash
-cd cf-outlook-email
-docker compose stop
-tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
-docker compose start
-```
-
-备份文件中可能包含：
-
-- 登录密码哈希
-- Outlook Refresh Token
-- API Key
-- Telegram 配置
-- 邮箱和分组数据
-
-请把备份存放在安全位置，不要上传到公开网盘或 GitHub。
-
-### 恢复
-
-停止服务：
-
-```bash
-cd cf-outlook-email
-docker compose stop
-```
-
-保留当前数据：
-
-```bash
-mv data data.before-restore
-```
-
-恢复备份：
-
-```bash
-tar -xzf ../cf-outlook-email-data-日期时间.tar.gz
-```
-
-重新启动：
+以后可以重新启动：
 
 ```bash
 docker compose up -d
-docker compose logs --tail=200 outlook-email
-curl http://127.0.0.1:8787/healthz
 ```
 
-恢复时必须恢复完整的 `data/` 目录，不要只复制 `outlook-email.db` 而忽略可能存在的 WAL/SHM 文件。
+### 删除本地构建镜像
+
+```bash
+docker compose down --remove-orphans
+docker image rm cf-outlook-email:local
+```
+
+如果镜像仍被其他容器引用，Docker 会拒绝删除。应先检查相关容器，不建议默认使用强制删除参数。
+
+### 彻底卸载并删除数据
+
+先把需要保留的备份移到项目目录之外，然后执行：
+
+```bash
+input_dir=/path/to/cf-outlook-email
+project_dir=$(realpath -e "$input_dir") || { echo "项目路径不存在"; exit 1; }
+
+# 防止路径为空、写成根目录或指向错误项目
+case "$project_dir" in
+    /*) ;;
+    *) echo "必须使用绝对路径"; exit 1 ;;
+esac
+[ "$project_dir" != "/" ] || { echo "不能删除根目录"; exit 1; }
+[ -f "$project_dir/docker-compose.yml" ] || { echo "未找到 docker-compose.yml"; exit 1; }
+[ -d "$project_dir/data" ] || { echo "未找到数据目录"; exit 1; }
+
+cd "$project_dir" || exit 1
+docker compose down --remove-orphans || exit 1
+if docker image inspect cf-outlook-email:local >/dev/null 2>&1; then
+    docker image rm cf-outlook-email:local || exit 1
+fi
+
+cd / || exit 1
+rm -rf -- "$project_dir"
+```
+
+> 最后一条命令会永久删除源码、`.env`、SQLite 数据、账号资料、Refresh Token 和全部系统设置，无法撤销。执行前请再次确认 `project_dir` 是正确的绝对路径，并确保备份存放在项目目录之外。
+
+本项目使用 `./data:/data` 绑定挂载，不是 Docker 命名卷。因此 `docker compose down -v` 不会代替你删除宿主机上的 `./data`。
 
 ## 常用命令
 
-### 查看状态
-
 ```bash
+# 查看状态
 docker compose ps
-```
 
-### 查看实时日志
-
-```bash
+# 查看日志
 docker compose logs -f --tail=200 outlook-email
-```
 
-### 停止服务
-
-```bash
+# 停止/启动
 docker compose stop
-```
-
-### 启动服务
-
-```bash
 docker compose start
-```
 
-### 重启服务
-
-```bash
+# 重启
 docker compose restart outlook-email
+
+# 重新构建
+docker compose up -d --build --remove-orphans
+
+# 健康检查
+curl -fsS http://127.0.0.1:8787/healthz
 ```
 
-### 重新构建
+## 数据安全
 
-```bash
-docker compose up -d --build
-```
+`data/`、`.env`、数据库备份和账号导出文件可能包含：
 
-### 完全停止并删除容器
+- Microsoft Refresh Token 和 Client ID
+- 批量导入时保存的邮箱密码
+- 管理后台登录密码哈希
+- 外部 API Key
+- Telegram Bot Token 和 Chat ID
+- GPTMail API Key
+- 邮箱、分组、标签和任务记录
 
-```bash
-docker compose down
-```
-
-`docker compose down` 不会删除绑定挂载的 `./data` 目录，但执行前仍建议先备份。
-
-## 环境变量
-
-| 变量 | 是否必填 | 默认值 | 用途 |
-|---|:---:|---|---|
-| `ADMIN_PASSWORD` | 是 | 无 | 管理后台初始密码 |
-| `COOKIE_SECRET` | 是 | 无 | 登录 Cookie 签名密钥 |
-| `PUBLIC_URL` | 推荐填写 | 根据请求头推导 | 公网访问地址、OAuth 回调和安全 Cookie |
-| `APP_PORT` | 否 | `8787` | 映射到宿主机的端口 |
-| `BIND_ADDRESS` | 否 | `127.0.0.1` | 宿主机监听地址 |
-| `GPTMAIL_API_KEY` | 否 | 无 | GPTMail API Key |
-
-注意：
-
-- 缺少 `ADMIN_PASSWORD` 或 `COOKIE_SECRET` 时，容器会拒绝启动。
-- `PUBLIC_URL` 只能包含协议、域名和可选端口，不能包含路径、参数或锚点。
-- 修改 `COOKIE_SECRET` 会使所有现有登录会话失效。
-- 不要提交 `.env` 和 `data/`。
-
-## 后台任务
-
-Docker 容器中运行一个长驻 Node.js 服务：
-
-- 每 5 分钟唤醒 Token 刷新调度器
-- 每 5 分钟唤醒 Telegram 新邮件推送调度器
-- 每 5 秒推进一次后台批量检测任务
-
-是否真正刷新或推送，由后台系统设置中的开关、任务间隔和批量大小决定。
-
-自动刷新不能保证 Token 永远有效。用户撤销授权、微软风控、账号异常或应用权限变化都可能导致 Token 失效。
-
-## 从 Cloudflare D1 迁移
-
-如果以前使用 Cloudflare Workers + D1 版本，可以把现有账号、分组、设置和推送状态导入 Docker SQLite。
-
-迁移文件中包含 Refresh Token、API Key 等敏感信息，而且导入只允许写入空数据库。请按照 [Docker 部署文档中的迁移步骤](./docs/DOCKER.md#2-从-cloudflare-d1-迁移已有数据) 操作。
-
-## 技术结构
-
-```text
-浏览器
-  ↓
-Nginx / Caddy（HTTPS）
-  ↓
-Docker Compose
-  ↓
-Node.js + Hono
-  ├── 前端静态文件
-  ├── Microsoft Graph API
-  ├── 后台定时任务
-  └── SQLite：./data/outlook-email.db
-```
-
-主要目录：
-
-```text
-server/                  Node.js 服务入口和 SQLite 兼容层
-src/                     后端业务逻辑和 API 路由
-public/                  前端静态文件
-migrations/              数据库迁移
-Dockerfile               Docker 镜像构建配置
-docker-compose.yml       容器、端口和数据目录配置
-docker-entrypoint.sh     容器启动脚本
-.env.example             环境变量示例
-docs/                    Docker、API 和其他说明文档
-```
-
-## 安全建议
-
-- 使用足够强的后台登录密码
-- 使用随机且长期固定的 `COOKIE_SECRET`
-- 生产环境必须使用 HTTPS
-- 默认保持 `BIND_ADDRESS=127.0.0.1`
-- 不要公开 `.env`、`data/` 和数据库备份
-- 定期备份整个 `data/` 目录
-- 只添加你本人拥有或明确授权管理的邮箱
-- 正式使用建议注册自己的 Azure 应用
+请将这些文件视为高敏感数据，不要上传到 GitHub、公开网盘或发送给不可信人员。
 
 ## 相关文档
 
-- [Docker 详细部署与 D1 迁移](./docs/DOCKER.md)
+- [Docker 部署与 D1 数据迁移](./docs/DOCKER.md)
 - [外部 API 文档](./docs/API.md)
 - [Azure OAuth 配置参考](./docs/GUIDE.md#自己注册-azure-应用)
 - [English README](./README_EN.md)
 
-## 免责声明
-
-本项目仅供个人学习和管理自己拥有或已获授权的邮箱。不得用于未授权访问他人邮箱、窃取邮件、绕过访问控制或其他违法用途。使用者应自行承担部署和使用本项目产生的责任。
-
 ## 许可证
 
-本项目使用 [GPL-3.0](./LICENSE) 协议开源。你可以使用、修改和分发本项目，但公开分发的衍生版本也必须按照 GPL-3.0 提供完整源代码。
+本项目使用 [GPL-3.0](./LICENSE) 协议开源。
