@@ -13,6 +13,7 @@ import tempEmailRoutes from './routes/tempEmails';
 import oauthRoutes from './routes/oauth';
 import externalRoutes from './routes/external';
 import tagRoutes from './routes/tags';
+import { reconcileExpiredRegistrationClaims } from './registration';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -77,6 +78,7 @@ export default {
       (async () => {
         await runTokenRefresh(env);
         await runEmailPush(env);
+        await reconcileExpiredRegistrationClaims(env.DB);
         // On Workers there is no long-lived process, so a background detection
         // job advances one batch per cron tick.
         await advanceDetectJob(env);

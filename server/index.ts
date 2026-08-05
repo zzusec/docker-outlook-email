@@ -8,6 +8,7 @@ import { advanceDetectJob } from '../src/detect';
 import type { Env } from '../src/types';
 import { applyMigrations, importD1Data, openDatabase } from './sqlite';
 import { rewriteExternalUrl } from './url';
+import { reconcileExpiredRegistrationClaims } from '../src/registration';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 // A background detection job advances one batch per tick. 10 accounts every 5s
@@ -53,6 +54,10 @@ async function main(): Promise<void> {
     ADMIN_PASSWORD: requiredEnv('ADMIN_PASSWORD'),
     COOKIE_SECRET: requiredEnv('COOKIE_SECRET'),
     GPTMAIL_API_KEY: process.env.GPTMAIL_API_KEY?.trim() || undefined,
+    REGISTRATION_API_KEYS: process.env.REGISTRATION_API_KEYS?.trim() || undefined,
+    REGISTRATION_KR_API_KEY: process.env.REGISTRATION_KR_API_KEY?.trim() || undefined,
+    REGISTRATION_US2_API_KEY: process.env.REGISTRATION_US2_API_KEY?.trim() || undefined,
+    REGISTRATION_CLAIM_SECRET: process.env.REGISTRATION_CLAIM_SECRET?.trim() || undefined,
   };
   const publicUrl = process.env.PUBLIC_URL?.trim() || undefined;
   if (publicUrl) rewriteExternalUrl(new Request('http://localhost/'), publicUrl);
@@ -88,6 +93,8 @@ async function main(): Promise<void> {
     try {
       console.log(await runTokenRefresh(env));
       console.log(await runEmailPush(env));
+      const expiredClaims = await reconcileExpiredRegistrationClaims(env.DB);
+      if (expiredClaims) console.log(`Reconciled ${expiredClaims} expired registration claims`);
     } catch (error) {
       console.error('Scheduled run failed:', error);
     } finally {

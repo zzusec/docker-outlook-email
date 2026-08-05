@@ -5,6 +5,12 @@ export interface Env {
   ADMIN_PASSWORD: string;
   COOKIE_SECRET: string;
   GPTMAIL_API_KEY?: string;
+  // Registration-only credentials are environment-managed secrets. API keys are
+  // resolved to stable client IDs and are never stored in D1.
+  REGISTRATION_API_KEYS?: string;
+  REGISTRATION_KR_API_KEY?: string;
+  REGISTRATION_US2_API_KEY?: string;
+  REGISTRATION_CLAIM_SECRET?: string;
 }
 
 // Database row types
@@ -99,4 +105,8 @@ export interface GraphMailMessage {
     contentType: string;
     content: string;
   };
+  internetMessageHeaders?: Array<{
+    name: string;
+    value: string;
+  }>;
 }

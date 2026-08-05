@@ -12,6 +12,12 @@ database_name = "outlook-email-db"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 migrations_dir = "migrations"
 
+# Registration mailbox credentials must be configured as Workers secrets, never
+# as checked-in [vars]. Example names:
+#   wrangler secret put REGISTRATION_KR_API_KEY
+#   wrangler secret put REGISTRATION_US2_API_KEY
+#   wrangler secret put REGISTRATION_CLAIM_SECRET
+
 # Base wake-up rate for token keep-alive + Telegram push (every 5 min).
 # Effective interval / batch / on-off is controlled in 系统设置 at runtime.
 # Free plan allows up to 5 cron triggers per account.

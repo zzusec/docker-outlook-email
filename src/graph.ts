@@ -84,7 +84,12 @@ export async function getAccessToken(
       const err = (await res.json().catch(() => ({}))) as Record<string, string>;
       return {
         error: {
-          code: err.error || 'TOKEN_FAILED',
+          code:
+            res.status === 429
+              ? 'RATE_LIMITED'
+              : res.status >= 500
+                ? 'NETWORK_ERROR'
+                : err.error || 'TOKEN_FAILED',
           message: err.error_description
             ? sanitizeErrorMessage(err.error_description)
             : `Token request failed with status ${res.status}`,
@@ -178,6 +183,17 @@ function normalizeRecipients(raw: unknown): Array<{ emailAddress: { name: string
   });
 }
 
+function normalizeInternetMessageHeaders(raw: unknown): Array<{ name: string; value: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const header = (item || {}) as AnyRec;
+    return {
+      name: String(pick(header, 'name', 'Name') ?? ''),
+      value: String(pick(header, 'value', 'Value') ?? ''),
+    };
+  });
+}
+
 function normalizeMessage(raw: AnyRec): GraphMailMessage {
   const fromRaw = pick<AnyRec>(raw, 'from', 'From');
   const bodyRaw = pick<AnyRec>(raw, 'body', 'Body');
@@ -199,6 +215,9 @@ function normalizeMessage(raw: AnyRec): GraphMailMessage {
           content: String(pick(bodyRaw, 'content', 'Content') ?? ''),
         }
       : undefined,
+    internetMessageHeaders: normalizeInternetMessageHeaders(
+      pick(raw, 'internetMessageHeaders', 'InternetMessageHeaders')
+    ),
   };
 }
 
@@ -306,8 +325,8 @@ export async function fetchEmails(
       $skip: String(skip),
       $orderby: useGraph ? 'receivedDateTime desc' : 'ReceivedDateTime desc',
       $select: useGraph
-        ? 'id,subject,from,receivedDateTime,bodyPreview,isRead,hasAttachments'
-        : 'Id,Subject,From,ReceivedDateTime,BodyPreview,IsRead,HasAttachments',
+        ? 'id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead,hasAttachments,internetMessageHeaders'
+        : 'Id,Subject,From,ToRecipients,ReceivedDateTime,BodyPreview,IsRead,HasAttachments,InternetMessageHeaders',
     });
     const headers: Record<string, string> = {
       Prefer: 'outlook.body-content-type="text"',
@@ -382,8 +401,8 @@ export async function fetchEmailDetail(
     const useGraph = backend === 'graph';
     const base = useGraph ? GRAPH_BASE : OUTLOOK_REST_BASE;
     const select = useGraph
-      ? 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,isRead,hasAttachments'
-      : 'Id,Subject,From,ToRecipients,CcRecipients,ReceivedDateTime,Body,BodyPreview,IsRead,HasAttachments';
+      ? 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,isRead,hasAttachments,internetMessageHeaders'
+      : 'Id,Subject,From,ToRecipients,CcRecipients,ReceivedDateTime,Body,BodyPreview,IsRead,HasAttachments,InternetMessageHeaders';
     return {
       url:
         `${base}/me/messages/${encodePathId(messageId)}?` +
