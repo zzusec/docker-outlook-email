@@ -56,6 +56,38 @@ export interface TempEmailRow {
   updated_at: string;
 }
 
+// A background detect / refresh / count job row.
+export interface DetectJobRow {
+  id: number;
+  kind: string;
+  scope_ids: string;
+  scope_group_id: number | null;
+  scope_status: string | null;
+  scope_tag_id: number | null;
+  scope_label: string;
+  total: number;
+  cursor_id: number;
+  processed: number;
+  connected: number;
+  failed: number;
+  deleted: number;
+  state: string;
+  last_email: string;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+// A task log row (token refresh / email push / detect / log cleanup).
+export interface TaskLogRow {
+  id: number;
+  task: string;
+  level: string;
+  message: string;
+  created_at: string;
+}
+
 // API response types
 export interface ApiResponse<T = unknown> {
   success: boolean;

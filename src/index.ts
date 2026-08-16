@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { authMiddleware } from './auth';
 import { fail } from './response';
-import { runTokenRefresh, runEmailPush } from './cron';
+import { runTokenRefresh, runEmailPush, runLogCleanup } from './cron';
 import { advanceDetectJob } from './detect';
 import authRoutes from './routes/auth';
 import groupRoutes from './routes/groups';
@@ -13,6 +13,8 @@ import tempEmailRoutes from './routes/tempEmails';
 import oauthRoutes from './routes/oauth';
 import externalRoutes from './routes/external';
 import tagRoutes from './routes/tags';
+import ingestRoutes from './routes/ingest';
+import taskRoutes from './routes/tasks';
 import { reconcileExpiredRegistrationClaims } from './registration';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -57,6 +59,9 @@ app.route('/api/oauth', oauthRoutes);
 // External API (no cookie auth - uses its own API-key check)
 app.route('/api/external', externalRoutes);
 
+// Ingest API (no cookie auth - API-key check, lets automation push accounts)
+app.route('/api/ingest', ingestRoutes);
+
 // Protected API routes
 app.use('/api/*', authMiddleware());
 app.route('/api/groups', groupRoutes);
@@ -65,6 +70,7 @@ app.route('/api/accounts', accountRoutes);
 app.route('/api/accounts/:id/emails', emailRoutes);
 app.route('/api/settings', settingRoutes);
 app.route('/api/temp-emails', tempEmailRoutes);
+app.route('/api/tasks', taskRoutes);
 
 export default {
   fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
@@ -82,6 +88,8 @@ export default {
         // On Workers there is no long-lived process, so a background detection
         // job advances one batch per cron tick.
         await advanceDetectJob(env);
+        // Prune old task_logs every tick (cheap, idempotent DELETE)
+        await runLogCleanup(env);
       })()
     );
   },
