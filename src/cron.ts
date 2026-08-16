@@ -32,6 +32,42 @@ async function setSetting(db: D1Database, key: string, value: string): Promise<v
   );
 }
 
+// Append a row to task_logs (best-effort; never fails the caller). Used by the
+// token refresh, email push, and log cleanup jobs so the admin can see what
+// each cron tick actually did from the 系统设置 / 任务日志 page.
+export async function logTask(
+  env: Env,
+  task: string,
+  level: 'info' | 'warn' | 'error',
+  message: string
+): Promise<void> {
+  try {
+    await run(
+      env.DB,
+      `INSERT INTO task_logs (task, level, message) VALUES (?, ?, ?)`,
+      [task, level, message]
+    );
+  } catch {
+    // Logging must never break the job that's calling it
+  }
+}
+
+// Prune old task_logs. Retention comes from settings (task_log_retention_days,
+// default 30). Called once per cron tick — the DELETE is cheap and idempotent,
+// so running it every tick (not just hourly) is harmless and keeps the table
+// from growing unbounded between what used to be hourly cleanups.
+export async function runLogCleanup(env: Env): Promise<string> {
+  const days = parseInt((await getSetting(env.DB, 'task_log_retention_days')) || '30', 10) || 30;
+  const r = await run(
+    env.DB,
+    `DELETE FROM task_logs WHERE created_at < datetime('now', ?)`,
+    [`-${days} days`]
+  );
+  const summary = `清理 ${days} 天前日志，删除 ${r.meta.changes ?? 0} 条`;
+  await logTask(env, 'log_cleanup', 'info', summary);
+  return summary;
+}
+
 // Refresh a batch of the least-recently-updated accounts' tokens.
 // Returns a short summary string (also persisted for the settings page to show).
 export async function runTokenRefresh(env: Env, opts: { force?: boolean } = {}): Promise<string> {
@@ -115,6 +151,7 @@ export async function runTokenRefresh(env: Env, opts: { force?: boolean } = {}):
     (updateInbox ? `，更新邮件数 ${counted}` : '');
   await setSetting(db, 'token_refresh_last_run', String(Date.now()));
   await setSetting(db, 'token_refresh_last_result', summary);
+  await logTask(env, 'token_refresh', fail > 0 || deleted > 0 ? 'warn' : 'info', summary);
   return summary;
 }
 
@@ -242,5 +279,6 @@ export async function runEmailPush(env: Env, opts: { force?: boolean } = {}): Pr
   const summary = `${new Date().toISOString()} 推送：扫描 ${accounts.length} 个账号，发送 ${sent} 条，失败账号 ${failedAccounts}`;
   await setSetting(db, 'telegram_push_last_run', String(Date.now()));
   await setSetting(db, 'telegram_push_last_result', summary);
+  await logTask(env, 'email_push', failedAccounts > 0 ? 'warn' : 'info', summary);
   return summary;
 }
