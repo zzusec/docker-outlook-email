@@ -2279,6 +2279,7 @@ async function renderSettings(el) {
     </div>
     </div>
   `;
+  if (externalApiEnabled) updateGeneratedUrl();
 }
 
 async function saveTelegramSettings() {
