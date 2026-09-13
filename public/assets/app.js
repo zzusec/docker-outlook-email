@@ -2115,59 +2115,6 @@ async function renderSettings(el) {
             ${externalApiEnabled ? `<div class="form-group">
               <label class="form-label">${t('调用示例')}</label>
               <input class="form-input settings-mono settings-example" readonly value="${location.origin}/api/external/emails?email=${t('你的邮箱')}&key=${esc(settings.external_api_key)}" onclick="this.select()">
-            </div>
-            <div class="form-group">
-              <label class="form-label">${t('接口生成器')}</label>
-              <div style="background:var(--bg-hover);border:1px solid var(--border-light);border-radius:8px;padding:12px;margin-bottom:12px">
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-                  <div>
-                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('国家')}</label>
-                    <select class="form-select" id="genCountry" onchange="updateGeneratedUrl()" style="font-size:13px">
-                      <option value="">${t('全部')}</option>
-                      <option value="US">美国 (US)</option>
-                      <option value="UK">英国 (UK)</option>
-                      <option value="CA">加拿大 (CA)</option>
-                      <option value="AU">澳大利亚 (AU)</option>
-                      <option value="DE">德国 (DE)</option>
-                      <option value="FR">法国 (FR)</option>
-                      <option value="JP">日本 (JP)</option>
-                      <option value="KR">韩国 (KR)</option>
-                      <option value="SG">新加坡 (SG)</option>
-                      <option value="HK">香港 (HK)</option>
-                      <option value="TW">台湾 (TW)</option>
-                      <option value="BR">巴西 (BR)</option>
-                      <option value="IN">印度 (IN)</option>
-                      <option value="MX">墨西哥 (MX)</option>
-                      <option value="NL">荷兰 (NL)</option>
-                      <option value="ES">西班牙 (ES)</option>
-                      <option value="IT">意大利 (IT)</option>
-                      <option value="RU">俄罗斯 (RU)</option>
-                      <option value="ZA">南非 (ZA)</option>
-                      <option value="AE">阿联酋 (AE)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('IP类型')}</label>
-                    <select class="form-select" id="genIpType" onchange="updateGeneratedUrl()" style="font-size:13px">
-                      <option value="">${t('全部')}</option>
-                      <option value="residential">${t('住宅IP')}</option>
-                      <option value="native">${t('原生IP')}</option>
-                      <option value="datacenter">${t('机房IP')}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="form-label" style="font-size:12px;margin-bottom:4px">${t('接口类型')}</label>
-                    <select class="form-select" id="genApiType" onchange="updateGeneratedUrl()" style="font-size:13px">
-                      <option value="accounts">${t('获取邮箱列表')}</option>
-                      <option value="emails">${t('获取邮件列表')}</option>
-                    </select>
-                  </div>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <input class="form-input settings-mono" id="generatedUrl" readonly style="flex:1;font-size:12px" onclick="this.select()">
-                  <button class="btn btn-sm" type="button" onclick="copyText(document.getElementById('generatedUrl').value, this)">${t('复制')}</button>
-                </div>
-              </div>
             </div>` : ''}
           </div>
           <div class="settings-actions">
@@ -2279,7 +2226,6 @@ async function renderSettings(el) {
     </div>
     </div>
   `;
-  if (externalApiEnabled) updateGeneratedUrl();
 }
 
 async function saveTelegramSettings() {
@@ -2346,28 +2292,6 @@ async function clearApiKey() {
   const res = await api('/settings/external-key', { method: 'DELETE' });
   if (res?.success) { toast(res.message || t('已停用')); navigate('settings'); }
   else toast(res?.error?.message || t('操作失败'), 'error');
-}
-
-// 动态生成外部接口 URL
-function updateGeneratedUrl() {
-  const country = document.getElementById('genCountry')?.value || '';
-  const ipType = document.getElementById('genIpType')?.value || '';
-  const apiType = document.getElementById('genApiType')?.value || 'accounts';
-  const apiKey = document.getElementById('sExternalKey')?.value || '';
-
-  if (!apiKey) return;
-
-  let url = `${location.origin}/api/external/${apiType}?key=${apiKey}`;
-
-  if (country) url += `&country=${country}`;
-  if (ipType) url += `&ip_type=${ipType}`;
-
-  if (apiType === 'emails') {
-    url += `&email=${encodeURIComponent(t('你的邮箱'))}`;
-  }
-
-  const input = document.getElementById('generatedUrl');
-  if (input) input.value = url;
 }
 
 async function saveSettings() {

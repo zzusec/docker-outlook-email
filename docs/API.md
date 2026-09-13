@@ -72,6 +72,18 @@ GET /api/external/emails
 | `top` | ❌ | 返回条数，默认 10，最大 50 |
 | `keyword` | ❌ | 搜索关键词 |
 | `extract_code` | ❌ | 传 `1` 时自动从邮件中提取验证码，返回 `codes` 字段 |
+| `include_aliases` | ❌ | 传 `1` 时启用「包含子账号」：从 `registration_alias_claims` 读取该账号已分配的 Plus 别名（`user+N@outlook.com`），对返回邮件按 `toRecipients` 做小写匹配，命中的邮件补 `matched_recipients` 字段。**不额外发 Graph 请求**，因为 Plus 别名邮件本来就在主账号收件箱里 |
+| `alias_limit` | ❌ | `include_aliases=1` 时生效：最多回溯多少个别名，默认 10，最大 50。按 `alias_index` 倒序取最近 N 个。已释放/过期的别名索引只增不复用，老账号建议设小一点 |
+
+**关于「包含子账号」**：
+
+子账号在本系统里有三种含义，本接口只覆盖第 1、2 种：
+
+1. **Plus 别名**（`user+1@outlook.com` … `user+N@outlook.com`）：Microsoft 把这些邮件全部投递到主账号的**同一个收件箱**，所以查询主账号时本来就看得见，`include_aliases=1` 只是在结果上额外标注哪些邮件命中了哪个别名，**不会额外调用 Microsoft Graph**。
+2. **注册 Claim 已分配的别名**：`registration_alias_claims` 表里每条记录的 `recipient` 字段就是带 `+N` 的目标地址，`alias_index` 是只增不减的"烧掉"资源（已释放/过期的索引不会复用）。本接口读这张表做匹配，0 次额外 Graph 调用。
+3. **多个独立 Microsoft 账号 / 共享邮箱**：每个账号有独立 `refresh_token`，token 只能访问 `/me`，本接口**不支持**跨账号聚合。需要批量查请用 `/api/external/accounts` 取列表后逐个调用。
+
+返回字段 `matched_recipients` 是数组，列出了这封邮件的 `toRecipients` 命中的别名地址（小写）。没命中任何别名时为空数组 `[]`，但邮件仍保留在结果中（主账号本身的邮件仍可见）。
 
 ## 3. 调用示例
 
@@ -143,6 +155,48 @@ curl "https://你的域名/api/external/accounts?key=你的Key"
 ```
 
 返回所有可用邮箱，用于选择要查询的邮箱。
+
+**包含子账号（Plus 别名）**
+
+```bash
+curl "https://你的域名/api/external/emails?email=abc@outlook.com&key=你的Key&include_aliases=1&alias_limit=10&top=10"
+```
+
+返回结果会多 `include_aliases`、`alias_count` 两个字段，每封邮件多一个 `matched_recipients` 数组：
+
+```json
+{
+  "success": true,
+  "data": {
+    "email": "abc@outlook.com",
+    "folder": "inbox",
+    "include_aliases": true,
+    "alias_count": 3,
+    "count": 2,
+    "items": [
+      {
+        "id": "AAQ...",
+        "subject": "Welcome",
+        "from": { "name": "Some Service", "address": "noreply@x.com" },
+        "receivedDateTime": "2026-06-08T08:00:00Z",
+        "bodyPreview": "Hello user+1, welcome...",
+        "isRead": false,
+        "matched_recipients": ["abc+1@outlook.com"]
+      },
+      {
+        "id": "AAR...",
+        "subject": "主账号自己的邮件",
+        "from": { "name": "Foo", "address": "bar@baz.com" },
+        "receivedDateTime": "2026-06-08T07:00:00Z",
+        "bodyPreview": "...",
+        "isRead": true,
+        "matched_recipients": []
+      }
+    ]
+  }
+}
+```
+
 
 ## 4. 返回格式
 

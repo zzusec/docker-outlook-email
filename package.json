@@ -1,5 +1,5 @@
 {
-  "name": "cf-outlook-email",
+  "name": "docker-outlook-email",
   "version": "2.0.0",
   "private": true,
   "packageManager": "pnpm@11.10.0",

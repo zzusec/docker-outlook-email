@@ -1,4 +1,4 @@
-# cf-outlook-email
+# docker-outlook-email
 
 A self-hosted web dashboard for managing multiple **Outlook, Hotmail, and Live email accounts** from one place.
 

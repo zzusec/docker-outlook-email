@@ -1,7 +1,7 @@
 services:
   outlook-email:
     build: .
-    image: cf-outlook-email:local
+    image: docker-outlook-email:local
     container_name: outlook-email
     restart: unless-stopped
     env_file:

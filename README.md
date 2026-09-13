@@ -1,4 +1,4 @@
-# cf-outlook-email
+# docker-outlook-email
 
 一个自托管的 **Outlook / Hotmail 邮箱集中管理后台**。
 
@@ -344,7 +344,7 @@ docker compose up -d
 
 ```bash
 docker compose down --remove-orphans
-docker image rm cf-outlook-email:local
+docker image rm docker-outlook-email:local
 ```
 
 如果镜像仍被其他容器引用，Docker 会拒绝删除。应先检查相关容器，不建议默认使用强制删除参数。
@@ -368,8 +368,8 @@ esac
 
 cd "$project_dir" || exit 1
 docker compose down --remove-orphans || exit 1
-if docker image inspect cf-outlook-email:local >/dev/null 2>&1; then
-    docker image rm cf-outlook-email:local || exit 1
+if docker image inspect docker-outlook-email:local >/dev/null 2>&1; then
+    docker image rm docker-outlook-email:local || exit 1
 fi
 
 cd / || exit 1
