@@ -80,8 +80,8 @@ openssl version
 ### 2. 下载项目
 
 ```bash
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
+git clone https://github.com/zzusec/docker-outlook-email.git
+cd docker-outlook-email
 ```
 
 ### 3. 创建配置
@@ -259,7 +259,7 @@ https://mail.example.com/api/oauth/callback
 SQLite 使用 WAL 模式。升级前应停止服务，并备份完整的 `data/` 和 `.env`：
 
 ```bash
-cd /path/to/cf-outlook-email || exit 1
+cd /path/to/docker-outlook-email || exit 1
 
 # 记录回退时需要匹配的源码版本
 git rev-parse HEAD || exit 1
@@ -268,7 +268,7 @@ git rev-parse HEAD || exit 1
 # 备份完成后保持停止，直接进行下一步升级
 docker compose stop || exit 1
 umask 077
-backup="../cf-outlook-email-backup-$(date +%F-%H%M%S).tar.gz"
+backup="../docker-outlook-email-backup-$(date +%F-%H%M%S).tar.gz"
 tar -czf "$backup" data .env || { docker compose start; exit 1; }
 ```
 
@@ -284,7 +284,7 @@ outlook-email.db-shm
 ### 2. 拉取并重建
 
 ```bash
-cd /path/to/cf-outlook-email
+cd /path/to/docker-outlook-email
 git pull --ff-only
 docker compose up -d --build --remove-orphans
 ```
@@ -324,7 +324,7 @@ docker compose logs --tail=300 outlook-email
 ### 停止服务但保留数据
 
 ```bash
-cd /path/to/cf-outlook-email
+cd /path/to/docker-outlook-email
 docker compose down --remove-orphans
 ```
 
@@ -354,7 +354,7 @@ docker image rm docker-outlook-email:local
 先把需要保留的备份移到项目目录之外，然后执行：
 
 ```bash
-input_dir=/path/to/cf-outlook-email
+input_dir=/path/to/docker-outlook-email
 project_dir=$(realpath -e "$input_dir") || { echo "项目路径不存在"; exit 1; }
 
 # 防止路径为空、写成根目录或指向错误项目

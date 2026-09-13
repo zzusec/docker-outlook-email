@@ -51,8 +51,8 @@ docker compose version
 ### 2. Download the project
 
 ```bash
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
+git clone https://github.com/zzusec/docker-outlook-email.git
+cd docker-outlook-email
 ```
 
 ### 3. Create the configuration
@@ -213,14 +213,14 @@ The project does not use a remote prebuilt image. Pull the source and rebuild th
 Enter the project directory:
 
 ```bash
-cd cf-outlook-email
+cd docker-outlook-email
 ```
 
 Back up the data:
 
 ```bash
 docker compose stop
-tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+tar -czf ../docker-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
 docker compose start
 ```
 
@@ -283,9 +283,9 @@ Restore the pre-update data backup if the database also needs to be rolled back.
 SQLite runs in WAL mode. Stop the service briefly and archive the entire `data/` directory:
 
 ```bash
-cd cf-outlook-email
+cd docker-outlook-email
 docker compose stop
-tar -czf ../cf-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
+tar -czf ../docker-outlook-email-data-$(date +%F-%H%M%S).tar.gz data
 docker compose start
 ```
 
@@ -294,10 +294,10 @@ The backup may contain password hashes, Outlook refresh tokens, API keys, Telegr
 ### Restore
 
 ```bash
-cd cf-outlook-email
+cd docker-outlook-email
 docker compose stop
 mv data data.before-restore
-tar -xzf ../cf-outlook-email-data-TIMESTAMP.tar.gz
+tar -xzf ../docker-outlook-email-data-TIMESTAMP.tar.gz
 docker compose up -d
 docker compose logs --tail=200 outlook-email
 curl http://127.0.0.1:8787/healthz

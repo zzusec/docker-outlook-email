@@ -7,8 +7,8 @@ Docker 模式复用现有 Hono 后端和前端，使用本地 SQLite 代替 Clou
 服务器需要安装 Docker Engine 和 Docker Compose v2。
 
 ```bash
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
+git clone https://github.com/zzusec/docker-outlook-email.git
+cd docker-outlook-email
 cp .env.example .env
 openssl rand -hex 32
 ```

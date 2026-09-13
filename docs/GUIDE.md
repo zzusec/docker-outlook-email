@@ -43,8 +43,8 @@
 不想逐步敲命令时，用仓库根目录的 `install.sh`（自动装依赖、登录检查、建/复用 D1、写 `wrangler.toml`、设 Secret、迁移、部署）：
 
 ```bash
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
+git clone https://github.com/zzusec/docker-outlook-email.git
+cd docker-outlook-email
 chmod +x install.sh
 ./install.sh
 ```
@@ -97,8 +97,8 @@ pnpm --version    # 应该显示版本号
 ## 第二步：获取代码
 
 ```bash
-git clone https://github.com/zzusec/cf-outlook-email.git
-cd cf-outlook-email
+git clone https://github.com/zzusec/docker-outlook-email.git
+cd docker-outlook-email
 pnpm install
 ```
 
