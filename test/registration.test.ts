@@ -180,7 +180,7 @@ describe('registration claim migration and allocation', () => {
     expect(kr.response.status).toBe(200);
     expect(us2.response.status).toBe(200);
     expect(new Set([kr.body.data.recipient, us2.body.data.recipient])).toEqual(
-      new Set(['mailbox@example.com', 'mailbox+1@example.com'])
+      new Set(['mailbox+1@example.com', 'mailbox+2@example.com'])
     );
     expect(kr.body.data.claim).not.toBe(us2.body.data.claim);
 
@@ -195,11 +195,11 @@ describe('registration claim migration and allocation', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     const firstClaim = await allocate(db, KR_KEY, 'burn-0');
-    expect(firstClaim.body.data.recipient).toBe('mailbox@example.com');
+    expect(firstClaim.body.data.recipient).toBe('mailbox+1@example.com');
     expect((await post(db, '/release', KR_KEY, { claim: firstClaim.body.data.claim, reason: 'failed' })).status).toBe(200);
 
     const secondClaim = await allocate(db, KR_KEY, 'burn-1');
-    expect(secondClaim.body.data.recipient).toBe('mailbox+1@example.com');
+    expect(secondClaim.body.data.recipient).toBe('mailbox+2@example.com');
     await run(
       db as unknown as D1Database,
       'UPDATE registration_alias_claims SET lease_expires_at = 0 WHERE recipient = ?',
@@ -207,21 +207,21 @@ describe('registration claim migration and allocation', () => {
     );
 
     const thirdClaim = await allocate(db, KR_KEY, 'burn-2');
-    expect(thirdClaim.body.data.recipient).toBe('mailbox+2@example.com');
+    expect(thirdClaim.body.data.recipient).toBe('mailbox+3@example.com');
     const states = await query<{ recipient: string; state: string }>(
       db as unknown as D1Database,
       'SELECT recipient, state FROM registration_alias_claims ORDER BY alias_index'
     );
     expect(states).toEqual([
-      { recipient: 'mailbox@example.com', state: 'released' },
-      { recipient: 'mailbox+1@example.com', state: 'expired' },
-      { recipient: 'mailbox+2@example.com', state: 'active' },
+      { recipient: 'mailbox+1@example.com', state: 'released' },
+      { recipient: 'mailbox+2@example.com', state: 'expired' },
+      { recipient: 'mailbox+3@example.com', state: 'active' },
     ]);
 
     await run(db as unknown as D1Database, 'DELETE FROM accounts WHERE email = ?', ['mailbox@example.com']);
     await addAccount(db);
     const afterReimport = await allocate(db, KR_KEY, 'burn-after-reimport');
-    expect(afterReimport.body.data.recipient).toBe('mailbox+3@example.com');
+    expect(afterReimport.body.data.recipient).toBe('mailbox+4@example.com');
   });
 
   it('balances new allocations across eligible active mailboxes', async () => {
@@ -233,7 +233,7 @@ describe('registration claim migration and allocation', () => {
     const one = await allocate(db, KR_KEY, 'balanced-1');
     const two = await allocate(db, KR_KEY, 'balanced-2');
     expect(new Set([one.body.data.recipient, two.body.data.recipient])).toEqual(
-      new Set(['first@example.com', 'second@example.com'])
+      new Set(['first+1@example.com', 'second+1@example.com'])
     );
   });
 });
@@ -264,7 +264,7 @@ describe('registration authentication and lease semantics', () => {
       envFor(db)
     );
     expect(response.status).toBe(200);
-    expect((await response.json() as any).data.recipient).toBe('mailbox@example.com');
+    expect((await response.json() as any).data.recipient).toBe('mailbox+1@example.com');
   });
 
   it('accepts registration keys only in X-API-Key and rejects wrong-client claims', async () => {
@@ -396,7 +396,7 @@ describe('exact recipient matching and message consumption', () => {
     const primary = await allocate(db, KR_KEY, 'primary-burn');
     await post(db, '/release', KR_KEY, { claim: primary.body.data.claim, reason: 'failed' });
     const plus = await allocate(db, KR_KEY, 'plus-recipient');
-    expect(plus.body.data.recipient).toBe('mailbox+1@example.com');
+    expect(plus.body.data.recipient).toBe('mailbox+2@example.com');
 
     const old = graphMessage('old', new Date(Date.now() - 10 * 60_000).toISOString(), {
       recipients: [plus.body.data.recipient],

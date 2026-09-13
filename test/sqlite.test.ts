@@ -34,6 +34,7 @@ describe('SQLite D1 compatibility layer', () => {
       '0008_detect_jobs.sql',
       '0009_detect_job_kinds.sql',
       '0010_registration_alias_claims.sql',
+      '0011_ingest_and_task_logs.sql',
     ]);
     expect(applyMigrations(db, resolve('migrations'))).toEqual([]);
 
