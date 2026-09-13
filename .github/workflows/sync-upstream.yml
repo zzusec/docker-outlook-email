@@ -3,7 +3,7 @@ name: Sync upstream
 # 每天自动从官网仓库 roseforyou/cf-outlook-email 拉取更新。
 # 规则：
 #   - 干净合并 + 类型检查 + 单元测试全过  → 推 main（线上 Docker 需人工重建后才生效）
-#   - 有冲突，或自检不过                  → 一律不推、不部署，只开 Issue 通知
+#   - 有冲突，或自检不过                  → 一律不推，只把冲突详情写进运行日志和 job summary
 on:
   schedule:
     # UTC 18:23 = 北京时间次日 02:23
@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: sync-upstream
@@ -89,30 +88,38 @@ jobs:
         if: steps.sync.outputs.state == 'ready'
         run: git push origin main
 
-      # 冲突或自检失败时，生产环境完全不动，只留一个 Issue 等人处理。
-      # 同名 Issue 已存在就追加评论，避免每天刷一个新的。
-      - name: 需要人工处理 → 开 Issue
+      # 冲突或自检失败时，生产环境完全不动，只把详情写进运行日志和 job summary。
+      # 不开 Issue：本仓库 Issues 是关着的，gh issue create 会直接把 run 标红。
+      - name: 需要人工处理 → 记录日志
         if: steps.sync.outputs.state == 'conflict' || steps.sync.outputs.state == 'verify-failed'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STATE: ${{ steps.sync.outputs.state }}
           BEHIND: ${{ steps.sync.outputs.behind }}
           CONFLICTS: ${{ steps.sync.outputs.conflicts }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title='官网更新需要人工合并'
           if [ "$STATE" = "conflict" ]; then
-            reason="合并官网更新时发生冲突，冲突文件：\`${CONFLICTS:-未记录}\`"
+            reason="合并官网更新时发生冲突"
+            conflicts="${CONFLICTS:-未记录}"
           else
             reason='官网更新能干净合并，但类型检查或单元测试没通过'
+            conflicts=''
           fi
-          body=$(printf '%s\n\n- 官网领先本仓库 **%s** 个提交\n- 原因：%s\n- 运行日志：%s\n\n生产环境未做任何改动，线上仍是上一个已验证版本。\n' \
-            '自动同步已停下，等待人工处理。' "$BEHIND" "$reason" "$RUN_URL")
 
-          existing=$(gh issue list --state open --search "in:title ${title}" \
-            --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-          else
-            gh issue create --title "$title" --body "$body"
+          echo "::warning::${reason}：官网领先本仓库 ${BEHIND} 个提交，等待人工合并"
+          if [ -n "$conflicts" ]; then
+            for file in $conflicts; do
+              echo "::warning::冲突文件：$file"
+            done
           fi
+
+          {
+            echo "## 官网更新需要人工合并"
+            echo
+            echo "- 状态：\`${STATE}\`"
+            echo "- 官网领先本仓库：**${BEHIND}** 个提交"
+            echo "- 原因：${reason}"
+            echo "- 冲突文件：\`${conflicts:-（无）}\`"
+            echo
+            echo "生产环境未做任何改动，线上仍是上一个已验证版本。"
+            echo "处理办法：本地 \`git fetch upstream && git merge upstream/main\`，解完冲突后推送。"
+          } >> "$GITHUB_STEP_SUMMARY"
